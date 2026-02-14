@@ -195,6 +195,7 @@ app.get("/reports/today", async (_req, res) => {
     productionPacks: Number(production.rows[0].packs),
   });
 });
+app.use(express.static("public"));
 
 app.get("/", (_req, res) => res.send("OK"));
 app.listen(process.env.PORT || 3000, () => console.log("API up"));
