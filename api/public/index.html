@@ -1,108 +1,156 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Yufka Kasa</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 0 12px; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin: 12px 0; }
-    input, select, button { padding: 10px; border-radius: 8px; border: 1px solid #ccc; }
-    button { cursor: pointer; }
-    .muted { color: #666; font-size: 13px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; }
-    .ok { color: #0a7; }
-    .err { color: #c00; }
+    body { font-family: Arial, sans-serif; background:#f6f7fb; margin:0; }
+    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid #e7e7e7; border-radius:12px; padding:16px; margin-bottom:16px; }
+    h1 { margin: 8px 0 18px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    input, select, button { padding:10px 12px; border-radius:10px; border:1px solid #ccc; font-size:14px; }
+    button { cursor:pointer; background:#1f6feb; color:#fff; border:none; }
+    button.gray { background:#666; }
+    button.red { background:#d33; }
+    button.green { background:#159f5b; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:10px; border-bottom:1px solid #eee; text-align:left; }
+    th { background:#fafafa; }
+    .muted { color:#666; font-size:13px; }
+    .ok { color:#159f5b; font-weight:600; }
+    .err { color:#d33; font-weight:600; }
+    .hidden { display:none; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#f0f3ff; font-size:12px; }
+    .right { margin-left:auto; }
   </style>
 </head>
 <body>
-  <h2>Yufka Kasa</h2>
+  <div class="wrap">
+    <h1>Yufka Kasa</h1>
 
-  <div class="card" id="loginCard">
-    <h3>Giriş</h3>
-    <div class="row">
-      <input id="pin" placeholder="PIN" />
-      <button id="btnLogin">Giriş</button>
-      <button id="btnLogout" style="display:none">Çıkış</button>
+    <div class="card" id="loginCard">
+      <h2>Giriş</h2>
+      <div class="row">
+        <input id="pin" placeholder="PIN" />
+        <button id="btnLogin">Giriş</button>
+        <span class="muted">Admin PIN Render env: <b>ADMIN_PIN</b></span>
+      </div>
+      <div id="loginMsg" class="muted"></div>
     </div>
-    <div class="muted">Admin PIN: Render’daki <b>ADMIN_PIN</b> (şu an: 13296584)</div>
-    <div id="loginMsg"></div>
+
+    <div class="card hidden" id="mainCard">
+      <div class="row">
+        <div>
+          <div class="pill" id="userPill">Giriş: -</div>
+          <div class="muted">Token ile çalışır (daha güvenli). Client role göndermiyor.</div>
+        </div>
+        <button class="gray right" id="btnLogout">Çıkış</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="reportsCard">
+      <h2>Raporlar</h2>
+      <div class="row">
+        <button id="btnToday">Bugün Raporu</button>
+
+        <label class="muted">Başlangıç</label>
+        <input type="date" id="fromDate" />
+        <label class="muted">Bitiş</label>
+        <input type="date" id="toDate" />
+        <button id="btnRange">Tarih Arası</button>
+
+        <label class="muted">Aylık</label>
+        <input type="month" id="ym" />
+        <button id="btnMonth">Ay Raporu</button>
+      </div>
+
+      <pre id="reportOut" class="card" style="background:#0b1020;color:#d7e0ff;overflow:auto;"></pre>
+    </div>
+
+    <div class="card hidden" id="customersCard">
+      <h2>Müşteriler</h2>
+      <div class="row">
+        <button class="gray" id="btnReloadCustomers">Müşterileri Yenile</button>
+        <div id="custMsg" class="muted"></div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Firma</th>
+            <th>Telefon</th>
+            <th>Fiyat</th>
+            <th>Bakiye</th>
+            <th>İşlem</th>
+          </tr>
+        </thead>
+        <tbody id="custBody"></tbody>
+      </table>
+
+      <div class="card" id="adminCustomerBox">
+        <h2>Yeni / Düzenle Müşteri (ADMIN)</h2>
+        <div class="row">
+          <input id="cId" placeholder="ID (düzenleme için)" style="width:180px" />
+          <input id="cName" placeholder="Firma adı" style="min-width:260px" />
+          <input id="cPhone" placeholder="Telefon" />
+          <input id="cPrice" placeholder="Fiyat/Pack" />
+          <button class="green" id="btnAdd">Ekle</button>
+          <button id="btnUpdate">Güncelle</button>
+          <button class="red" id="btnDelete">Sil (Kaldır)</button>
+        </div>
+        <div class="muted">Not: Silme “soft delete”tir. Kayıt pasif olur.</div>
+      </div>
+    </div>
+
+    <div class="card hidden" id="opsCard">
+      <h2>İşlemler</h2>
+
+      <div class="card">
+        <h2>Satış / Tahsilat / İade</h2>
+        <div class="row">
+          <select id="ledgerType">
+            <option value="SALE">SATIŞ</option>
+            <option value="PAYMENT">TAHSİLAT</option>
+            <option value="RETURN">İADE</option>
+          </select>
+          <input id="ledgerCustomerId" placeholder="Müşteri ID" />
+          <input id="ledgerPacks" placeholder="Paket (satış/iade)" />
+          <input id="ledgerAmount" placeholder="Tutar (sadece tahsilat)" />
+          <input id="ledgerNote" placeholder="Not" style="min-width:260px" />
+          <input type="date" id="ledgerDate" />
+          <button id="btnLedger">Kaydet</button>
+        </div>
+        <div class="muted">Admin geçmiş tarih girebilir. Personel girerse bugüne yazar.</div>
+      </div>
+
+      <div class="card">
+        <h2>Gider</h2>
+        <div class="row">
+          <input id="expAmount" placeholder="Tutar" />
+          <input id="expNote" placeholder="Not" style="min-width:260px" />
+          <input type="date" id="expDate" />
+          <button id="btnExpense">Gider Kaydet</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Üretim</h2>
+        <div class="row">
+          <input id="prodPacks" placeholder="Üretim paket" />
+          <input id="prodNote" placeholder="Not" style="min-width:260px" />
+          <input type="date" id="prodDate" />
+          <button id="btnProd">Üretim Kaydet</button>
+        </div>
+      </div>
+
+      <div id="opMsg" class="muted"></div>
+    </div>
   </div>
 
-  <div class="card" id="mainCard" style="display:none">
-    <h3>Özet</h3>
-    <div class="row">
-      <button id="btnRefresh">Bugün Raporu Getir</button>
-      <span id="who"></span>
-    </div>
-    <pre id="reportBox" class="muted">Rapor bekleniyor...</pre>
-  </div>
-
-  <div class="card" id="customersCard" style="display:none">
-    <h3>Müşteriler</h3>
-    <div class="row">
-      <button id="btnLoadCustomers">Müşterileri Yenile</button>
-    </div>
-    <div id="customersMsg"></div>
-    <table id="customersTable"></table>
-
-    <hr/>
-
-    <h4>Yeni Müşteri (Sadece ADMIN)</h4>
-    <div class="row">
-      <input id="cName" placeholder="Firma adı" />
-      <input id="cPhone" placeholder="Telefon" />
-      <input id="cPrice" placeholder="Paket fiyatı (örn 95)" />
-      <button id="btnAddCustomer">Ekle</button>
-    </div>
-  </div>
-
-  <div class="card" id="ledgerCard" style="display:none">
-    <h3>Satış / Tahsilat / İade</h3>
-
-    <div class="row">
-      <select id="customerSelect"></select>
-      <select id="type">
-        <option value="SALE">SATIŞ</option>
-        <option value="PAYMENT">TAHSİLAT</option>
-        <option value="RETURN">İADE</option>
-      </select>
-      <input id="packs" placeholder="Paket (SATIŞ/İADE)" />
-      <input id="amount" placeholder="Tutar (TAHSİLAT)" />
-      <input id="note" placeholder="Not" />
-      <button id="btnAddLedger">Kaydet</button>
-    </div>
-
-    <div class="muted">
-      SATIŞ/İADE: paket gir. <br/>
-      TAHSİLAT: sadece tutar gir (ör: 5000). Sistem otomatik eksi yazar.
-    </div>
-
-    <div id="ledgerMsg"></div>
-  </div>
-
-  <div class="card" id="expenseCard" style="display:none">
-    <h3>Gider</h3>
-    <div class="row">
-      <input id="expAmount" placeholder="Tutar (örn 250)" />
-      <input id="expNote" placeholder="Not" />
-      <button id="btnAddExpense">Gider Ekle</button>
-    </div>
-    <div id="expenseMsg"></div>
-  </div>
-
-  <div class="card" id="prodCard" style="display:none">
-    <h3>Üretim</h3>
-    <div class="row">
-      <input id="prodPacks" placeholder="Paket (örn 300)" />
-      <input id="prodNote" placeholder="Not" />
-      <button id="btnAddProd">Üretim Ekle</button>
-    </div>
-    <div id="prodMsg"></div>
-  </div>
-
-  <script src="/app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
