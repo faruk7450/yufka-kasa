@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
 import pg from "pg";
 import fs from "fs";
@@ -9,15 +9,29 @@ app.use(express.json());
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL yok. Render/Supabase bağlantısını env'e koymalısın.");
+// Render'da env adı DATABASE_URL olmalı (senin ekranında öyleydi)
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL yok. Render Environment'a koymalısın.");
   process.exit(1);
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// ✅ 1) SSL zinciri/self-signed hatası için
+// Supabase pooler kullanırken Render ortamında bazen bu gerekiyor.
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
 async function initDb() {
-  const sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
+  // ✅ 2) BOM temizliği (db.sql başındaki gizli karakter CREATE'i bozuyor)
+  let sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
+  sql = sql.replace(/^\uFEFF/, ""); // BOM temizle
+
+  // Bazı editörler başa görünmeyen karakterler koyuyor, bunu da temizleyelim:
+  sql = sql.trim();
+
   await pool.query(sql);
 
   const adminPin = process.env.ADMIN_PIN || "1234";
@@ -40,7 +54,10 @@ async function initDb() {
      SELECT 'Personel-2', 'STAFF', '2222'
      WHERE NOT EXISTS (SELECT 1 FROM users WHERE pin='2222');`
   );
+
+  console.log("DB init OK");
 }
+
 initDb().catch((e) => console.error("DB init hata:", e));
 
 app.post("/auth/login", async (req, res) => {
@@ -115,7 +132,7 @@ app.post("/ledger", async (req, res) => {
     amountSigned = -Math.abs(p * unitPrice);
   }
 
-  const finalDate = (userRole === "ADMIN" && entryDate) ? entryDate : null;
+  const finalDate = userRole === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
     `INSERT INTO ledger_entries(customer_id, entry_type, packs, unit_price, amount, note, created_by, entry_date)
@@ -129,7 +146,7 @@ app.post("/ledger", async (req, res) => {
 
 app.post("/expenses", async (req, res) => {
   const { userId, userRole, amount, note, entryDate } = req.body;
-  const finalDate = (userRole === "ADMIN" && entryDate) ? entryDate : null;
+  const finalDate = userRole === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
     `INSERT INTO expense_entries(amount, note, created_by, entry_date)
@@ -142,7 +159,7 @@ app.post("/expenses", async (req, res) => {
 
 app.post("/production", async (req, res) => {
   const { userId, userRole, packs, note, entryDate } = req.body;
-  const finalDate = (userRole === "ADMIN" && entryDate) ? entryDate : null;
+  const finalDate = userRole === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
     `INSERT INTO production_entries(packs, note, created_by, entry_date)
@@ -175,7 +192,7 @@ app.get("/reports/today", async (_req, res) => {
     payments: Number(payments.rows[0].total),
     returns: Number(returns.rows[0].total),
     expenses: Number(expenses.rows[0].total),
-    productionPacks: Number(production.rows[0].packs)
+    productionPacks: Number(production.rows[0].packs),
   });
 });
 
