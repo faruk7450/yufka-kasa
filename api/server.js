@@ -7,7 +7,6 @@ import jwt from "jsonwebtoken";
 const app = express();
 app.use(express.json());
 
-// ---- CORS (güvenlik) ----
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
@@ -16,7 +15,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // curl vs.
+      if (!origin) return cb(null, true);
       if (allowedOrigins.length === 0) return cb(null, true);
       return cb(null, allowedOrigins.includes(origin));
     },
@@ -26,7 +25,7 @@ app.use(
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL yok. Render env içine koymalısın.");
+  console.error("DATABASE_URL yok.");
   process.exit(1);
 }
 
@@ -38,7 +37,6 @@ const pool = new Pool({
       : undefined,
 });
 
-// ---- JWT ----
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const TOKEN_TTL = "30d";
 
@@ -54,7 +52,6 @@ function authRequired(req, res, next) {
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : "";
   if (!token) return res.status(401).json({ error: "Auth gerekli" });
-
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
@@ -72,7 +69,6 @@ function requireRole(...roles) {
   };
 }
 
-// ---- DB init (sıfır kurulum) ----
 async function initDb() {
   const fs = await import("fs");
   const sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
@@ -110,10 +106,8 @@ async function initDb() {
 
 initDb().catch((e) => console.error("DB init hata:", e));
 
-// ---- Static UI ----
 app.use(express.static(new URL("./public/", import.meta.url).pathname));
 
-// ---- AUTH ----
 app.post("/auth/login", async (req, res) => {
   const pin = String(req.body?.pin || "");
   if (!pin) return res.status(400).json({ error: "PIN gerekli" });
@@ -132,14 +126,13 @@ app.post("/auth/login", async (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 });
 
-// =====================================================
-//  COMPANIES + BRANCHES (Firma / Şube)
-// =====================================================
+/* =======================
+   FIRMA / ŞUBE
+======================= */
 
-// Firmalar (liste)
 app.get("/companies", authRequired, async (_req, res) => {
   const r = await pool.query(
-    `SELECT id, name
+    `SELECT id, name, price_per_pack
      FROM companies
      WHERE is_active=true
      ORDER BY name`
@@ -147,44 +140,44 @@ app.get("/companies", authRequired, async (_req, res) => {
   res.json(r.rows);
 });
 
-// Firma ekle (ADMIN)
 app.post("/companies", authRequired, requireRole("ADMIN"), async (req, res) => {
   const name = String(req.body?.name || "").trim();
+  const pricePerPack = Number(req.body?.pricePerPack || 0);
   if (!name) return res.status(400).json({ error: "Firma adı gerekli" });
 
   const r = await pool.query(
-    `INSERT INTO companies(name) VALUES($1)
-     ON CONFLICT (name) DO UPDATE SET is_active=true
+    `INSERT INTO companies(name, price_per_pack)
+     VALUES($1,$2)
+     ON CONFLICT (name) DO UPDATE
+       SET is_active=true, price_per_pack=EXCLUDED.price_per_pack
      RETURNING *`,
-    [name]
+    [name, pricePerPack]
   );
   res.json(r.rows[0]);
 });
 
-// Firma sil (soft)
-app.delete(
-  "/companies/:id",
-  authRequired,
-  requireRole("ADMIN"),
-  async (req, res) => {
-    const id = Number(req.params.id);
-    const r = await pool.query(
-      `UPDATE companies SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
-      [id]
-    );
-    if (r.rowCount === 0)
-      return res.status(404).json({ error: "Firma bulunamadı" });
-    res.json({ ok: true });
-  }
-);
+app.put("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
+  const id = Number(req.params.id);
+  const name = String(req.body?.name || "").trim();
+  const pricePerPack = Number(req.body?.pricePerPack || 0);
+  if (!name) return res.status(400).json({ error: "Firma adı gerekli" });
 
-// Şubeler: firmaya göre liste (dropdown için)
+  const r = await pool.query(
+    `UPDATE companies SET name=$1, price_per_pack=$2
+     WHERE id=$3 AND is_active=true
+     RETURNING *`,
+    [name, pricePerPack, id]
+  );
+  if (r.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
+  res.json(r.rows[0]);
+});
+
 app.get("/branches", authRequired, async (req, res) => {
   const companyId = Number(req.query.companyId || 0);
   if (!companyId) return res.status(400).json({ error: "companyId gerekli" });
 
   const r = await pool.query(
-    `SELECT id, company_id, name, full_name, phone, price_per_pack
+    `SELECT id, company_id, name, full_name, phone
      FROM branches
      WHERE is_active=true AND company_id=$1
      ORDER BY name`,
@@ -193,27 +186,10 @@ app.get("/branches", authRequired, async (req, res) => {
   res.json(r.rows);
 });
 
-// Tüm şubeler (admin ekranı için)
-app.get("/branches/all", authRequired, requireRole("ADMIN"), async (_req, res) => {
-  const r = await pool.query(
-    `SELECT b.id, b.company_id, c.name AS company_name,
-            b.name, b.full_name, b.phone, b.price_per_pack,
-            COALESCE(bb.balance,0) AS balance
-     FROM branches b
-     JOIN companies c ON c.id=b.company_id
-     LEFT JOIN branch_balances bb ON bb.branch_id=b.id
-     WHERE b.is_active=true AND c.is_active=true
-     ORDER BY c.name, b.name`
-  );
-  res.json(r.rows);
-});
-
-// Şube ekle (ADMIN)
 app.post("/branches", authRequired, requireRole("ADMIN"), async (req, res) => {
   const companyId = Number(req.body?.companyId || 0);
-  const name = String(req.body?.name || "").trim(); // "Kesikbaş"
+  const name = String(req.body?.name || "").trim();
   const phone = req.body?.phone ? String(req.body.phone).trim() : null;
-  const pricePerPack = Number(req.body?.pricePerPack || 0);
 
   if (!companyId) return res.status(400).json({ error: "companyId gerekli" });
   if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
@@ -224,77 +200,76 @@ app.post("/branches", authRequired, requireRole("ADMIN"), async (req, res) => {
   );
   if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
 
-  const companyName = c.rows[0].name;
-  const fullName = `${companyName} / ${name}`;
+  const fullName = `${c.rows[0].name} / ${name}`;
 
   const r = await pool.query(
-    `INSERT INTO branches(company_id, name, full_name, phone, price_per_pack)
-     VALUES($1,$2,$3,$4,$5)
+    `INSERT INTO branches(company_id, name, full_name, phone)
+     VALUES($1,$2,$3,$4)
      ON CONFLICT (company_id, name) DO UPDATE
-       SET is_active=true, full_name=EXCLUDED.full_name, phone=EXCLUDED.phone, price_per_pack=EXCLUDED.price_per_pack
+       SET is_active=true, full_name=EXCLUDED.full_name, phone=EXCLUDED.phone
      RETURNING *`,
-    [companyId, name, fullName, phone, pricePerPack]
+    [companyId, name, fullName, phone]
   );
 
   res.json(r.rows[0]);
 });
 
-// Şube güncelle (ADMIN)
 app.put("/branches/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
   const id = Number(req.params.id);
   const name = String(req.body?.name || "").trim();
   const phone = req.body?.phone ? String(req.body.phone).trim() : null;
-  const pricePerPack = Number(req.body?.pricePerPack || 0);
+  if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
 
   const b = await pool.query(
     `SELECT b.id, b.company_id, c.name AS company_name
      FROM branches b JOIN companies c ON c.id=b.company_id
-     WHERE b.id=$1 AND b.is_active=true`,
+     WHERE b.id=$1 AND b.is_active=true AND c.is_active=true`,
     [id]
   );
   if (b.rowCount === 0) return res.status(404).json({ error: "Şube yok" });
 
-  const companyName = b.rows[0].company_name;
-  const fullName = `${companyName} / ${name}`;
+  const fullName = `${b.rows[0].company_name} / ${name}`;
 
   const r = await pool.query(
-    `UPDATE branches
-     SET name=$1, full_name=$2, phone=$3, price_per_pack=$4
-     WHERE id=$5 AND is_active=true
+    `UPDATE branches SET name=$1, full_name=$2, phone=$3
+     WHERE id=$4 AND is_active=true
      RETURNING *`,
-    [name, fullName, phone, pricePerPack, id]
+    [name, fullName, phone, id]
   );
   res.json(r.rows[0]);
 });
 
-// Şube sil (soft) (ADMIN)
 app.delete("/branches/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
   const id = Number(req.params.id);
   const r = await pool.query(
     `UPDATE branches SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
     [id]
   );
-  if (r.rowCount === 0) return res.status(404).json({ error: "Şube bulunamadı" });
+  if (r.rowCount === 0) return res.status(404).json({ error: "Şube yok" });
   res.json({ ok: true });
 });
 
-// =====================================================
-//  LEDGER (satış/tahsilat/iade) artık branch_id ile
-// =====================================================
+/* =======================
+   LEDGER (SALE / PAYMENT / RETURN / DEBIT)
+======================= */
 app.post("/ledger", authRequired, async (req, res) => {
   const { branchId, type, packs, note, entryDate, amount } = req.body;
 
-  if (!["SALE", "PAYMENT", "RETURN"].includes(type)) {
+  if (!["SALE", "PAYMENT", "RETURN", "DEBIT"].includes(type)) {
     return res.status(400).json({ error: "Geçersiz type" });
   }
 
-  const b = await pool.query(
-    `SELECT price_per_pack FROM branches WHERE id=$1 AND is_active=true`,
+  // Fiyat firma bazlı: branch -> company price
+  const q = await pool.query(
+    `SELECT c.price_per_pack
+     FROM branches b
+     JOIN companies c ON c.id=b.company_id
+     WHERE b.id=$1 AND b.is_active=true AND c.is_active=true`,
     [Number(branchId)]
   );
-  if (b.rowCount === 0) return res.status(404).json({ error: "Şube yok" });
+  if (q.rowCount === 0) return res.status(404).json({ error: "Şube yok" });
 
-  const unitPrice = Number(b.rows[0].price_per_pack);
+  const unitPrice = Number(q.rows[0].price_per_pack);
   const p = Number(packs || 0);
   const rawAmount = Number(amount || 0);
 
@@ -312,6 +287,9 @@ app.post("/ledger", authRequired, async (req, res) => {
     packsFinal = p;
     unitPriceFinal = unitPrice;
     amountSigned = -Math.abs(p * unitPrice);
+  } else if (type === "DEBIT") {
+    // veresiye/alacak: sadece tutar
+    amountSigned = Math.abs(rawAmount);
   }
 
   const finalDate = req.user.role === "ADMIN" && entryDate ? entryDate : null;
@@ -335,7 +313,9 @@ app.post("/ledger", authRequired, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// ---- EXPENSES ----
+/* =======================
+   EXPENSE / PRODUCTION
+======================= */
 app.post("/expenses", authRequired, async (req, res) => {
   const { amount, note, entryDate } = req.body;
   const finalDate = req.user.role === "ADMIN" && entryDate ? entryDate : null;
@@ -349,7 +329,6 @@ app.post("/expenses", authRequired, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// ---- PRODUCTION ----
 app.post("/production", authRequired, async (req, res) => {
   const { packs, note, entryDate } = req.body;
   const finalDate = req.user.role === "ADMIN" && entryDate ? entryDate : null;
@@ -363,10 +342,9 @@ app.post("/production", authRequired, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// =====================================================
-// REPORTS (Bugün / Ay / Tarih Arası) + firma/şube kırılım
-// =====================================================
-
+/* =======================
+   REPORTS (basit)
+======================= */
 async function summaryBetween(from, to) {
   const sales = await pool.query(
     `SELECT COALESCE(SUM(amount),0) AS total FROM ledger_entries
@@ -381,6 +359,11 @@ async function summaryBetween(from, to) {
   const returns = await pool.query(
     `SELECT COALESCE(SUM(amount),0) AS total FROM ledger_entries
      WHERE entry_type='RETURN' AND entry_date BETWEEN $1 AND $2`,
+    [from, to]
+  );
+  const debits = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM ledger_entries
+     WHERE entry_type='DEBIT' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
   const expenses = await pool.query(
@@ -400,57 +383,10 @@ async function summaryBetween(from, to) {
     sales: Number(sales.rows[0].total),
     payments: Number(payments.rows[0].total),
     returns: Number(returns.rows[0].total),
+    debits: Number(debits.rows[0].total),
     expenses: Number(expenses.rows[0].total),
     productionPacks: Number(production.rows[0].packs),
   };
-}
-
-// Tarih arası firma/şube kırılımı
-async function breakdownBetween(from, to) {
-  const byBranch = await pool.query(
-    `
-    SELECT
-      c.id AS company_id,
-      c.name AS company_name,
-      b.id AS branch_id,
-      b.name AS branch_name,
-      b.full_name,
-      COALESCE(SUM(CASE WHEN le.entry_type='SALE'   THEN le.amount ELSE 0 END),0) AS sales,
-      COALESCE(SUM(CASE WHEN le.entry_type='PAYMENT' THEN le.amount ELSE 0 END),0) AS payments,
-      COALESCE(SUM(CASE WHEN le.entry_type='RETURN' THEN le.amount ELSE 0 END),0) AS returns,
-      COALESCE(SUM(le.amount),0) AS net
-    FROM ledger_entries le
-    JOIN branches b ON b.id=le.branch_id
-    JOIN companies c ON c.id=b.company_id
-    WHERE le.entry_date BETWEEN $1 AND $2
-      AND b.is_active=true AND c.is_active=true
-    GROUP BY c.id, c.name, b.id, b.name, b.full_name
-    ORDER BY c.name, b.name
-    `,
-    [from, to]
-  );
-
-  const byCompany = await pool.query(
-    `
-    SELECT
-      c.id AS company_id,
-      c.name AS company_name,
-      COALESCE(SUM(CASE WHEN le.entry_type='SALE'   THEN le.amount ELSE 0 END),0) AS sales,
-      COALESCE(SUM(CASE WHEN le.entry_type='PAYMENT' THEN le.amount ELSE 0 END),0) AS payments,
-      COALESCE(SUM(CASE WHEN le.entry_type='RETURN' THEN le.amount ELSE 0 END),0) AS returns,
-      COALESCE(SUM(le.amount),0) AS net
-    FROM ledger_entries le
-    JOIN branches b ON b.id=le.branch_id
-    JOIN companies c ON c.id=b.company_id
-    WHERE le.entry_date BETWEEN $1 AND $2
-      AND b.is_active=true AND c.is_active=true
-    GROUP BY c.id, c.name
-    ORDER BY c.name
-    `,
-    [from, to]
-  );
-
-  return { byCompany: byCompany.rows, byBranch: byBranch.rows };
 }
 
 app.get("/reports/today", authRequired, async (_req, res) => {
@@ -463,6 +399,9 @@ app.get("/reports/today", authRequired, async (_req, res) => {
   const r = await pool.query(
     `SELECT COALESCE(SUM(amount),0) AS total FROM ledger_entries WHERE entry_type='RETURN' AND entry_date=CURRENT_DATE`
   );
+  const d = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS total FROM ledger_entries WHERE entry_type='DEBIT' AND entry_date=CURRENT_DATE`
+  );
   const e = await pool.query(
     `SELECT COALESCE(SUM(amount),0) AS total FROM expense_entries WHERE entry_date=CURRENT_DATE`
   );
@@ -470,39 +409,28 @@ app.get("/reports/today", authRequired, async (_req, res) => {
     `SELECT COALESCE(SUM(packs),0) AS packs FROM production_entries WHERE entry_date=CURRENT_DATE`
   );
 
-  const br = await breakdownBetween(
-    new Date().toISOString().slice(0, 10),
-    new Date().toISOString().slice(0, 10)
-  );
-
   res.json({
     sales: Number(s.rows[0].total),
     payments: Number(p.rows[0].total),
     returns: Number(r.rows[0].total),
+    debits: Number(d.rows[0].total),
     expenses: Number(e.rows[0].total),
     productionPacks: Number(pr.rows[0].packs),
-    breakdown: br,
   });
 });
 
 app.get("/reports/range", authRequired, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
-
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return res.status(400).json({ error: "from/to formatı YYYY-MM-DD olmalı" });
   }
-
-  const data = await summaryBetween(from, to);
-  const br = await breakdownBetween(from, to);
-
-  res.json({ ...data, breakdown: br });
+  res.json(await summaryBetween(from, to));
 });
 
 app.get("/reports/month", authRequired, async (req, res) => {
   const ym = String(req.query.ym || "");
-  if (!/^\d{4}-\d{2}$/.test(ym))
-    return res.status(400).json({ error: "ym formatı YYYY-MM olmalı" });
+  if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: "ym formatı YYYY-MM olmalı" });
 
   const from = `${ym}-01`;
   const toQ = await pool.query(
@@ -510,46 +438,9 @@ app.get("/reports/month", authRequired, async (req, res) => {
     [from]
   );
   const to = toQ.rows[0].d.toISOString().slice(0, 10);
-
-  const data = await summaryBetween(from, to);
-  const br = await breakdownBetween(from, to);
-
-  res.json({ ...data, breakdown: br });
+  res.json(await summaryBetween(from, to));
 });
 
-// ---- BALANCES (güncel bakiyeler) ----
-app.get("/balances/companies", authRequired, async (_req, res) => {
-  const r = await pool.query(
-    `SELECT c.id, c.name, COALESCE(cb.balance,0) AS balance
-     FROM companies c
-     LEFT JOIN company_balances cb ON cb.company_id=c.id
-     WHERE c.is_active=true
-     ORDER BY c.name`
-  );
-  res.json(r.rows);
-});
-
-app.get("/balances/branches", authRequired, async (req, res) => {
-  const companyId = Number(req.query.companyId || 0);
-  if (!companyId) return res.status(400).json({ error: "companyId gerekli" });
-
-  const r = await pool.query(
-    `SELECT b.id, b.name, b.full_name, COALESCE(bb.balance,0) AS balance
-     FROM branches b
-     LEFT JOIN branch_balances bb ON bb.branch_id=b.id
-     WHERE b.is_active=true AND b.company_id=$1
-     ORDER BY b.name`,
-    [companyId]
-  );
-  res.json(r.rows);
-});
-
-// health
 app.get("/health", (_req, res) => res.json({ ok: true }));
-
-// root -> UI
-app.get("/", (_req, res) =>
-  res.sendFile(new URL("./public/index.html", import.meta.url))
-);
-
+app.get("/", (_req, res) => res.sendFile(new URL("./public/index.html", import.meta.url)));
 app.listen(process.env.PORT || 3000, () => console.log("API up"));
