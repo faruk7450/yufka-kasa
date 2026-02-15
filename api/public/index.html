@@ -4,10 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Yufka Kasa</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="container">
+
     <h1>Yufka Kasa</h1>
 
     <!-- LOGIN -->
@@ -18,11 +19,12 @@
         <button id="btnLogin">Giriş</button>
       </div>
       <div class="muted" id="loginMsg"></div>
+      <div class="muted">Admin PIN: Render’daki <b>ADMIN_PIN</b></div>
     </div>
 
-    <!-- TOP BAR -->
+    <!-- MAIN -->
     <div class="card hidden" id="mainCard">
-      <div class="row" style="justify-content:space-between">
+      <div class="row" style="justify-content:space-between;">
         <span class="pill" id="userPill">-</span>
         <button class="gray" id="btnLogout">Çıkış</button>
       </div>
@@ -30,58 +32,25 @@
 
     <!-- REPORTS -->
     <div class="card hidden" id="reportsCard">
-      <h2>Raporlar</h2>
+      <h2>Rapor</h2>
+
       <div class="row">
-        <button id="btnToday">Bugün</button>
+        <button id="btnToday">Bugün Raporu</button>
 
         <label class="muted">Başlangıç</label>
         <input type="date" id="fromDate" />
+
         <label class="muted">Bitiş</label>
         <input type="date" id="toDate" />
+
         <button id="btnRange">Tarih Arası</button>
 
-        <label class="muted">Ay</label>
+        <label class="muted">Aylık</label>
         <input type="month" id="ym" />
         <button id="btnMonth">Ay Raporu</button>
       </div>
-      <pre class="card" id="reportOut" style="background:#fff"></pre>
-    </div>
 
-    <!-- CUSTOMERS -->
-    <div class="card hidden" id="customersCard">
-      <h2>Müşteriler</h2>
-      <div class="row">
-        <button id="btnReloadCustomers" class="gray">Yenile</button>
-        <span class="muted" id="custMsg"></span>
-      </div>
-
-      <table class="table" style="margin-top:10px">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Firma</th>
-            <th>Telefon</th>
-            <th>Fiyat</th>
-            <th>Bakiye</th>
-          </tr>
-        </thead>
-        <tbody id="custBody"></tbody>
-      </table>
-
-      <!-- ADMIN müşteri ekle/düzenle -->
-      <div class="card" id="adminCustomerBox" style="margin-top:12px">
-        <h2>Yeni / Düzenle Müşteri (ADMIN)</h2>
-        <div class="row">
-          <input id="cId" placeholder="ID (güncelle/sil)" style="width:160px" />
-          <input id="cName" placeholder="Firma" style="min-width:220px" />
-          <input id="cPhone" placeholder="Telefon" style="min-width:180px" />
-          <input id="cPrice" placeholder="Fiyat" style="width:120px" />
-          <button id="btnAdd">Ekle</button>
-          <button id="btnUpdate" class="gray">Güncelle</button>
-          <button id="btnDelete" class="red">Sil (Kaldır)</button>
-        </div>
-        <div class="muted">Not: Silme “soft delete” (pasif yapar).</div>
-      </div>
+      <pre class="out" id="reportOut"></pre>
     </div>
 
     <!-- OPERATIONS -->
@@ -89,41 +58,79 @@
       <h2>İşlem Gir</h2>
 
       <div class="row">
-        <label class="muted">Müşteri</label>
-        <input id="ledgerCustomerId" placeholder="Müşteri ID" style="width:140px" />
+        <label class="muted">Firma</label>
+        <select id="companySelect"></select>
 
+        <label class="muted">Şube</label>
+        <select id="branchSelect"></select>
+
+        <span class="pill" id="companyTotal">Toplam: 0.00</span>
+      </div>
+
+      <div class="row">
         <select id="ledgerType">
           <option value="SALE">SATIŞ (Veresiye)</option>
           <option value="PAYMENT">TAHSİLAT</option>
+          <option value="DEBT_ADJ">ALACAK / VERESİYE (Tutar)</option>
           <option value="RETURN">İADE</option>
         </select>
 
-        <input id="ledgerPacks" placeholder="Paket" style="width:120px" />
-        <input id="ledgerAmount" placeholder="Tutar (tahsilat)" style="width:160px" />
-        <input id="ledgerNote" placeholder="Not" style="min-width:220px" />
+        <div id="ledgerPacksRow">
+          <input id="ledgerPacks" placeholder="Paket" />
+        </div>
+
+        <div id="ledgerAmountRow" style="display:none;">
+          <input id="ledgerAmount" placeholder="Tutar" />
+        </div>
+
+        <input id="ledgerNote" placeholder="Not" />
         <input type="date" id="ledgerDate" />
         <button id="btnLedger">Kaydet</button>
+
+        <input id="ledgerBranchId" type="hidden" />
       </div>
 
       <div class="muted" id="opMsg"></div>
 
-      <hr style="border:none;border-top:1px solid var(--bd);margin:14px 0">
+      <hr/>
 
-      <h2>Gider</h2>
+      <h3>Gider</h3>
       <div class="row">
-        <input id="expAmount" placeholder="Tutar" style="width:160px" />
-        <input id="expNote" placeholder="Not" style="min-width:220px" />
+        <input id="expAmount" placeholder="Gider tutarı" />
+        <input id="expNote" placeholder="Not" />
         <input type="date" id="expDate" />
         <button id="btnExpense">Gider Kaydet</button>
       </div>
 
-      <h2 style="margin-top:14px">Üretim</h2>
+      <h3>Üretim</h3>
       <div class="row">
-        <input id="prodPacks" placeholder="Paket" style="width:160px" />
-        <input id="prodNote" placeholder="Not" style="min-width:220px" />
+        <input id="prodPacks" placeholder="Üretim (paket)" />
+        <input id="prodNote" placeholder="Not" />
         <input type="date" id="prodDate" />
         <button id="btnProd">Üretim Kaydet</button>
       </div>
+    </div>
+
+    <!-- ADMIN: FİRMA/ŞUBE YÖNET -->
+    <div class="card hidden" id="adminCard">
+      <h2>Admin: Firma / Şube Yönetimi</h2>
+
+      <h3>Firma Ekle</h3>
+      <div class="row">
+        <input id="coName" placeholder="Firma adı (örn: İyaş)" />
+        <input id="coPhone" placeholder="Telefon (opsiyonel)" />
+        <input id="coPrice" placeholder="Fiyat (paket)" />
+        <button id="btnAddCompany" class="okbtn">Firma Ekle</button>
+      </div>
+
+      <h3>Şube Ekle</h3>
+      <div class="row">
+        <select id="coPickForBranch"></select>
+        <input id="brName" placeholder="Şube adı (örn: Kesikbaş)" />
+        <button id="btnAddBranch" class="okbtn">Şube Ekle</button>
+      </div>
+
+      <div class="muted" id="adminMsg"></div>
     </div>
 
   </div>
