@@ -2,6 +2,11 @@ let token = localStorage.getItem("token") || "";
 let me = JSON.parse(localStorage.getItem("me") || "null");
 
 function $(id){ return document.getElementById(id); }
+function todayYMD(){
+  const d = new Date();
+  const local = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+  return local.toISOString().slice(0,10); // yyyy-mm-dd
+}
 
 function setMsg(el, text, ok=true){
   el.className = ok ? "muted ok" : "muted err";
@@ -45,17 +50,25 @@ function showLoggedOut(){
 }
 
 function initDates(){
-  const now = new Date();
-  const today = now.toISOString().slice(0,10);
-  const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const ymd = todayYMD();
 
-  $("fromDate").value = first;
-  $("toDate").value = today;
-  $("ym").value = today.slice(0,7);
+  // İşlem tarihleri (personelde de bugüne gelsin)
+  ["ledgerDate","expDate","prodDate"].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.value = ymd;   // ✅ her seferinde bugünü bas
+  });
 
-  $("ledgerDate").value = today;
-  $("expDate").value = today;
-  $("prodDate").value = today;
+  // Rapor tarihleri
+  const from = document.getElementById("fromDate");
+  const to   = document.getElementById("toDate");
+  if (from) from.value = ymd;
+  if (to)   to.value   = ymd;
+
+  // Aylık: yyyy-mm
+  const ym = document.getElementById("ym");
+  if (ym) ym.value = ymd.slice(0,7);
+}
+
 }
 
 let companies = [];
