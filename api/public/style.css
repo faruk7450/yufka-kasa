@@ -11,6 +11,8 @@ button{background:var(--b);border-color:var(--b);color:#fff;cursor:pointer}
 button.gray{background:#374151;border-color:#374151}
 button.red{background:#dc2626;border-color:#dc2626}
 .muted{color:var(--mut);font-size:13px}
+.ok{color:#059669}
+.err{color:#dc2626}
 .hidden{display:none}
 .table{width:100%;border-collapse:collapse}
 .table th,.table td{border-bottom:1px solid var(--bd);padding:10px;text-align:left;font-size:14px}
