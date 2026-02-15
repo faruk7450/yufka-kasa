@@ -1,16 +1,7 @@
 BEGIN;
 
-DROP VIEW IF EXISTS company_balances CASCADE;
-DROP VIEW IF EXISTS branch_balances CASCADE;
-
-DROP TABLE IF EXISTS ledger_entries CASCADE;
-DROP TABLE IF EXISTS expense_entries CASCADE;
-DROP TABLE IF EXISTS production_entries CASCADE;
-DROP TABLE IF EXISTS branches CASCADE;
-DROP TABLE IF EXISTS companies CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-
-CREATE TABLE users (
+-- 1) USERS
+CREATE TABLE IF NOT EXISTS users (
   id           bigserial PRIMARY KEY,
   name         text NOT NULL,
   role         text NOT NULL CHECK (role IN ('ADMIN','STAFF_CASH','STAFF')),
@@ -19,32 +10,31 @@ CREATE TABLE users (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
--- Firma (ana)
-CREATE TABLE companies (
+-- 2) COMPANIES (Firma)
+CREATE TABLE IF NOT EXISTS companies (
   id             bigserial PRIMARY KEY,
   name           text NOT NULL UNIQUE,
-  price_per_pack numeric(12,2) NOT NULL DEFAULT 0,  -- fiyat firma bazlı
+  phone          text,
+  price_per_pack numeric(12,2) NOT NULL DEFAULT 0,
   is_active      boolean NOT NULL DEFAULT true,
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 
--- Şube (alt)
-CREATE TABLE branches (
+-- 3) BRANCHES (Şube)
+CREATE TABLE IF NOT EXISTS branches (
   id           bigserial PRIMARY KEY,
-  company_id   bigint NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-  name         text NOT NULL,   -- "Kesikbaş"
-  full_name    text NOT NULL,   -- "İyaş / Kesikbaş"
-  phone        text,
+  company_id   bigint NOT NULL REFERENCES companies(id),
+  name         text NOT NULL,
   is_active    boolean NOT NULL DEFAULT true,
   created_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE(company_id, name)
 );
 
--- Ledger artık branch_id ile ve DEBIT (veresiye) var
-CREATE TABLE ledger_entries (
+-- 4) LEDGER
+CREATE TABLE IF NOT EXISTS ledger_entries (
   id           bigserial PRIMARY KEY,
-  branch_id    bigint NOT NULL REFERENCES branches(id),
-  entry_type   text NOT NULL CHECK (entry_type IN ('SALE','PAYMENT','RETURN','DEBIT')),
+  branch_id    bigint REFERENCES branches(id),
+  entry_type   text NOT NULL CHECK (entry_type IN ('SALE','PAYMENT','RETURN','DEBT_ADJ')),
   packs        numeric(12,2) NOT NULL DEFAULT 0,
   unit_price   numeric(12,2) NOT NULL DEFAULT 0,
   amount       numeric(12,2) NOT NULL DEFAULT 0,
@@ -54,7 +44,12 @@ CREATE TABLE ledger_entries (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE expense_entries (
+-- Eğer eski sistemden gelen customer_id kolonu varsa, dursun; biz branch_id kullanıyoruz.
+ALTER TABLE ledger_entries
+  ADD COLUMN IF NOT EXISTS customer_id bigint;
+
+-- 5) EXPENSES
+CREATE TABLE IF NOT EXISTS expense_entries (
   id           bigserial PRIMARY KEY,
   amount       numeric(12,2) NOT NULL,
   note         text,
@@ -63,7 +58,8 @@ CREATE TABLE expense_entries (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE production_entries (
+-- 6) PRODUCTION
+CREATE TABLE IF NOT EXISTS production_entries (
   id           bigserial PRIMARY KEY,
   packs        numeric(12,2) NOT NULL,
   note         text,
@@ -72,22 +68,25 @@ CREATE TABLE production_entries (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_ledger_branch_date ON ledger_entries(branch_id, entry_date);
-CREATE INDEX idx_branch_company ON branches(company_id);
-
+-- 7) VIEWS: Branch balances
 CREATE OR REPLACE VIEW branch_balances AS
-SELECT b.id AS branch_id, COALESCE(SUM(le.amount),0) AS balance
+SELECT
+  b.id AS branch_id,
+  COALESCE(SUM(le.amount), 0) AS balance
 FROM branches b
-LEFT JOIN ledger_entries le ON le.branch_id=b.id
-WHERE b.is_active=true
+LEFT JOIN ledger_entries le ON le.branch_id = b.id
+WHERE b.is_active = true
 GROUP BY b.id;
 
+-- 8) VIEWS: Company balances (tüm şubeler toplamı)
 CREATE OR REPLACE VIEW company_balances AS
-SELECT c.id AS company_id, COALESCE(SUM(le.amount),0) AS balance
-FROM companies c
-LEFT JOIN branches b ON b.company_id=c.id AND b.is_active=true
-LEFT JOIN ledger_entries le ON le.branch_id=b.id
-WHERE c.is_active=true
-GROUP BY c.id;
+SELECT
+  co.id AS company_id,
+  COALESCE(SUM(le.amount), 0) AS balance
+FROM companies co
+LEFT JOIN branches b ON b.company_id = co.id AND b.is_active=true
+LEFT JOIN ledger_entries le ON le.branch_id = b.id
+WHERE co.is_active = true
+GROUP BY co.id;
 
 COMMIT;
