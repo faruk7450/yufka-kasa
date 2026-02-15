@@ -4,155 +4,142 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Yufka Kasa</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <div class="container">
     <h1>Yufka Kasa</h1>
 
     <!-- LOGIN -->
-    <div id="loginCard" class="card">
+    <div class="card" id="loginCard">
       <h2>Giriş</h2>
       <div class="row">
-        <input id="pin" placeholder="PIN" inputmode="numeric" />
+        <input id="pin" placeholder="PIN" />
         <button id="btnLogin">Giriş</button>
       </div>
       <div id="loginMsg" class="muted"></div>
-      <div class="muted">Admin PIN: Render env’deki <b>ADMIN_PIN</b></div>
+      <div class="muted">Admin PIN: Render’daki <b>ADMIN_PIN</b></div>
     </div>
 
     <!-- TOP BAR -->
-    <div id="mainCard" class="card hidden">
-      <div class="row space">
-        <span id="userPill" class="pill">-</span>
-        <button id="btnLogout" class="gray">Çıkış</button>
+    <div class="card hidden" id="mainCard">
+      <div class="row between">
+        <span class="pill" id="userPill">-</span>
+        <button class="gray" id="btnLogout">Çıkış</button>
       </div>
     </div>
 
     <!-- REPORTS -->
-    <div id="reportsCard" class="card hidden">
+    <div class="card hidden" id="reportsCard">
       <h2>Rapor</h2>
       <div class="row wrap">
         <button id="btnToday">Bugün Raporu</button>
 
-        <span class="muted">Başlangıç</span>
-        <input id="fromDate" type="date" />
-        <span class="muted">Bitiş</span>
-        <input id="toDate" type="date" />
+        <label>Başlangıç</label>
+        <input type="date" id="fromDate"/>
+        <label>Bitiş</label>
+        <input type="date" id="toDate"/>
         <button id="btnRange">Tarih Arası</button>
 
-        <span class="muted">Aylık</span>
-        <input id="ym" type="month" />
+        <label>Aylık</label>
+        <input type="month" id="ym"/>
         <button id="btnMonth">Ay Raporu</button>
       </div>
 
       <pre id="reportOut" class="pre"></pre>
     </div>
 
-    <!-- OPERATIONS -->
-    <div id="opsCard" class="card hidden">
+    <!-- OPS -->
+    <div class="card hidden" id="opsCard">
       <h2>İşlem Gir</h2>
 
       <div class="row wrap">
-        <label class="muted">Firma</label>
+        <label>Firma</label>
         <select id="companySelect"></select>
 
-        <label class="muted">Şube</label>
+        <label>Şube</label>
         <select id="branchSelect"></select>
 
-        <span class="pill" id="balPill">Toplam: 0.00</span>
-        <span class="pill" id="branchBalPill">Şube: 0.00</span>
+        <span class="pill">Toplam: <b id="companyTotal">0.00</b></span>
+        <span class="pill">Şube: <b id="branchTotal">0.00</b></span>
 
-        <button id="btnReloadCompanies" class="gray">Yenile</button>
+        <button class="gray" id="btnReloadAll">Yenile</button>
       </div>
 
       <div class="row wrap">
         <select id="ledgerType">
-          <option value="SALE">SATIŞ (Veresiye)</option>
-          <option value="CASH_SALE">PEŞİN SATIŞ (Satış+Tahsilat)</option>
+          <option value="SALE_CREDIT">SATIŞ (Veresiye)</option>
+          <option value="CASH_SALE">PEŞİN SATIŞ</option>
           <option value="DEBIT">ALACAK / VERESİYE (Tutar)</option>
           <option value="PAYMENT">TAHSİLAT (Tutar)</option>
           <option value="RETURN">İADE</option>
         </select>
 
-        <input id="ledgerPacks" placeholder="Paket" />
-        <input id="ledgerAmount" placeholder="Tutar" />
+        <input id="ledgerPacks" placeholder="Paket (satış/iade)" />
+        <input id="ledgerAmount" placeholder="Tutar (tahsilat/alacak)" />
         <input id="ledgerNote" placeholder="Not" />
-        <input id="ledgerDate" type="date" />
+        <input type="date" id="ledgerDate" />
         <button id="btnLedger">Kaydet</button>
       </div>
 
-      <div id="opMsg" class="muted"></div>
+      <div class="muted" id="opMsg"></div>
 
-      <hr />
+      <hr/>
 
-      <h3>Gider</h3>
+      <h2>Gider</h2>
       <div class="row wrap">
         <input id="expAmount" placeholder="Gider tutarı" />
         <input id="expNote" placeholder="Not" />
-        <input id="expDate" type="date" />
-        <button id="btnExpense" class="gray">Gider Kaydet</button>
+        <input type="date" id="expDate" />
+        <button id="btnExpense">Gider Kaydet</button>
       </div>
 
-      <h3>Üretim</h3>
+      <h2>Üretim</h2>
       <div class="row wrap">
         <input id="prodPacks" placeholder="Üretim (paket)" />
         <input id="prodNote" placeholder="Not" />
-        <input id="prodDate" type="date" />
-        <button id="btnProd" class="gray">Üretim Kaydet</button>
+        <input type="date" id="prodDate" />
+        <button id="btnProd">Üretim Kaydet</button>
       </div>
     </div>
 
     <!-- ADMIN -->
-    <div id="adminCard" class="card hidden">
+    <div class="card hidden" id="adminCard">
       <h2>Admin: Firma / Şube Yönetimi</h2>
 
       <div class="grid2">
-        <div class="box">
+        <div>
           <h3>Firma</h3>
           <div class="row wrap">
-            <input id="cId" placeholder="Firma ID (boş bırak: ekle)" />
-            <input id="cName" placeholder="Firma adı" />
-            <input id="cPhone" placeholder="Telefon" />
-            <input id="cPrice" placeholder="Fiyat (paket)" />
+            <input id="aCompanyId" placeholder="Firma ID (boş bırak: ekle)" />
+            <input id="aCompanyName" placeholder="Firma adı" />
+            <input id="aCompanyPhone" placeholder="Telefon" />
+            <input id="aCompanyPrice" placeholder="Paket fiyatı" />
           </div>
-          <div class="row wrap">
-            <button id="btnAddCompany">Firma Ekle</button>
-            <button id="btnUpdateCompany" class="gray">Firma Güncelle</button>
-            <button id="btnDeleteCompany" class="danger">Firma Kaldır</button>
+          <div class="row">
+            <button id="btnCompanySave">Firma Kaydet</button>
+            <button class="danger" id="btnCompanyDelete">Firma Kaldır</button>
           </div>
-          <div id="adminMsg" class="muted"></div>
+          <div class="muted" id="adminMsg"></div>
         </div>
 
-        <div class="box">
+        <div>
           <h3>Şube</h3>
           <div class="muted">Önce yukarıdan firma seç → sonra şube ekle.</div>
           <div class="row wrap">
-            <input id="branchName" placeholder="Yeni şube adı (örn: Kesikbaş)" />
-            <button id="btnAddBranch">Şube Ekle</button>
+            <input id="aBranchName" placeholder="Yeni şube adı (örn: Kesikbaş)" />
+            <button id="btnBranchAdd">Şube Ekle</button>
           </div>
           <div class="row wrap">
-            <input id="branchRenameId" placeholder="Şube ID" />
-            <input id="branchRenameName" placeholder="Yeni şube adı" />
-            <button id="btnRenameBranch" class="gray">Şube Güncelle</button>
-            <button id="btnDeleteBranch" class="danger">Şube Kaldır</button>
+            <input id="aBranchId" placeholder="Şube ID (silmek için)" />
+            <button class="danger" id="btnBranchDelete">Şube Kaldır</button>
           </div>
         </div>
       </div>
-
-      <hr />
-      <h3>Firmalar</h3>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>ID</th><th>Firma</th><th>Telefon</th><th>Fiyat</th><th>Bakiye</th>
-          </tr>
-        </thead>
-        <tbody id="companyBody"></tbody>
-      </table>
     </div>
+
   </div>
 
-  <script src="/app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
