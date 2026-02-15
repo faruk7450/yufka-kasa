@@ -69,8 +69,6 @@ function initDates(){
   if (ym) ym.value = ymd.slice(0,7);
 }
 
-}
-
 let companies = [];
 let branches = [];
 
