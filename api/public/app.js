@@ -377,6 +377,7 @@ window.addEventListener("load", async () => {
 
   if (token && me) {
     showLoggedIn();
+    applyRoleRestrictions();
     initDates();
     try {
       await loadCompanies();
@@ -388,3 +389,31 @@ window.addEventListener("load", async () => {
     showLoggedOut();
   }
 });
+
+function applyRoleRestrictions() {
+  const isAdmin = me?.role === "ADMIN";
+
+  // Tarih alanlarını kilitle
+  const dateIds = ["ledgerDate", "expDate", "prodDate", "fromDate", "toDate", "ym"];
+  dateIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !isAdmin;
+    if (!isAdmin) el.style.opacity = "0.7";
+  });
+
+  // Personelde sadece Bugün Raporu kalsın
+  if (!isAdmin) {
+    const btnRange = document.getElementById("btnRange");
+    const btnMonth = document.getElementById("btnMonth");
+    const from = document.getElementById("fromDate");
+    const to = document.getElementById("toDate");
+    const ym = document.getElementById("ym");
+
+    if (btnRange) btnRange.style.display = "none";
+    if (btnMonth) btnMonth.style.display = "none";
+    if (from) from.style.display = "none";
+    if (to) to.style.display = "none";
+    if (ym) ym.style.display = "none";
+  }
+}
