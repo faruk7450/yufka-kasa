@@ -5,15 +5,16 @@ body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;backgrou
 .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin:14px 0;box-shadow:0 8px 24px rgba(0,0,0,.06)}
 h1{margin:0 0 12px 0;font-size:28px}
 h2{margin:0 0 10px 0;font-size:18px}
+h3{margin:14px 0 8px 0;font-size:15px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button{height:36px;padding:0 10px;border:1px solid var(--bd);border-radius:10px;background:#fff;font-size:14px}
 button{background:var(--b);border-color:var(--b);color:#fff;cursor:pointer}
 button.gray{background:#374151;border-color:#374151}
-button.red{background:#dc2626;border-color:#dc2626}
-.muted{color:var(--mut);font-size:13px}
+button.okbtn{background:#16a34a;border-color:#16a34a}
+.muted{color:var(--mut);font-size:13px;margin-top:8px}
 .ok{color:#059669}
 .err{color:#dc2626}
 .hidden{display:none}
-.table{width:100%;border-collapse:collapse}
-.table th,.table td{border-bottom:1px solid var(--bd);padding:10px;text-align:left;font-size:14px}
+.out{background:#0b1220;color:#e5e7eb;padding:12px;border-radius:12px;overflow:auto}
 .pill{display:inline-block;background:#eef2ff;border:1px solid #c7d2fe;color:#1e3a8a;padding:6px 10px;border-radius:999px;font-size:13px}
+hr{border:none;border-top:1px solid var(--bd);margin:14px 0}
