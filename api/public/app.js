@@ -201,13 +201,21 @@ GİDER: ${fmt(r.expenses)}
 }
 
 function toggleLedgerFields(){
-  const selectedText = $("ledgerType").value;
-const type = ENTRY_TYPE_MAP[selectedText] || selectedText;
-  const needPacks = (type === "SALE_CREDIT" || type === "CASH_SALE" || type === "RETURN");
-  const needAmount = (type === "PAYMENT" || type === "DEBIT");
+const selectedText = $("ledgerType").value;
+const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
 
-  $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
-  $("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
+const needPacks =
+  (entryType === "SALE_CREDIT" ||
+   entryType === "SALE_CASH" ||
+   entryType === "RETURN");
+
+const needAmount =
+  (entryType === "RECEIVABLE" ||
+   entryType === "COLLECTION");
+
+$("ledgerPacks").style.display  = needPacks ? "inline-block" : "none";
+$("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
+
 }
 
 async function saveLedger(){
@@ -225,7 +233,7 @@ const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
   if (!branchId) return alert("Şube seç");
 
   if ((entryType === "PAYMENT" || entryType === "DEBIT") && !amount) return alert("Tutar gir");
-  if ((entryType === "SALE_CREDIT" || entryType === "CASH_SALE" || entryType === "RETURN") && packs <= 0) return alert("Paket gir");
+  if ((entryType === "SALE_CREDIT" || entryType === "SALE_CASH" || entryType === "RETURN") && packs <= 0) return alert("Paket gir");
 
   await api("/ledger", {
     method:"POST",
