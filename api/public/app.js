@@ -310,14 +310,6 @@ async function saveLedger() {
 }
 
 
-  setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
-  $("ledgerPacks").value = "";
-  $("ledgerAmount").value = "";
-  $("ledgerNote").value = "";
-  await loadCompanies();
-  await reportToday();
-}
-
 async function saveExpense(){
   const amount = Number($("expAmount").value || 0);
   const note = $("expNote").value || "";
