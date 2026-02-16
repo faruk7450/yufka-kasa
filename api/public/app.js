@@ -279,7 +279,7 @@ const entryType = $("ledgerType").value;
     })
   });
 
-  setMsg($("opsMsg"), "İşlem kaydedildi ✅", true);
+  setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
 
   // Kaydettikten sonra: şirket/şube toplamlarını ve bugünü yenile
   try {
