@@ -15,7 +15,8 @@ app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (allowedOrigins.length === 0) return cb(null, true);
-    return cb(null, allowedOrigins.includes(origin));
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(null, false);
   }
 }));
 
@@ -72,7 +73,6 @@ async function initDb() {
   const sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
   await pool.query(sql);
 
-  // kullanıcılar (yoksa ekle)
   const adminPin = String(process.env.ADMIN_PIN || "1234");
   const staffCashPin = String(process.env.STAFF_CASH_PIN || "1111");
   const staffPin = String(process.env.STAFF_PIN || "2222");
@@ -127,13 +127,41 @@ app.post("/auth/login", async (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 });
 
-// ---- COMPANIES (FİRMA) ----
+// ---- BALANCE helpers ----
+async function companyBalance(companyId) {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS bal
+     FROM ledger_entries
+     WHERE company_id=$1`,
+    [companyId]
+  );
+  return Number(r.rows[0].bal);
+}
+
+async function branchBalance(branchId) {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS bal
+     FROM ledger_entries
+     WHERE branch_id=$1`,
+    [branchId]
+  );
+  return Number(r.rows[0].bal);
+}
+
+// ---- COMPANIES ----
 app.get("/companies", authRequired, async (_req, res) => {
+  // balance dahil (UI dropdown bunu kullanıyor)
   const r = await pool.query(`
-    SELECT id, name, phone, price_per_pack
-    FROM companies
-    WHERE is_active=true
-    ORDER BY name
+    SELECT
+      c.id, c.name, c.phone, c.price_per_pack,
+      COALESCE((
+        SELECT SUM(le.amount)
+        FROM ledger_entries le
+        WHERE le.company_id = c.id
+      ), 0) AS balance
+    FROM companies c
+    WHERE c.is_active=true
+    ORDER BY c.name
   `);
   res.json(r.rows);
 });
@@ -173,7 +201,6 @@ app.put("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res) =
   res.json(r.rows[0]);
 });
 
-// soft delete
 app.delete("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
   const id = Number(req.params.id);
   const r = await pool.query(
@@ -184,7 +211,7 @@ app.delete("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res
   res.json({ ok: true });
 });
 
-// ---- BRANCHES (ŞUBE) ----
+// ---- BRANCHES ----
 app.get("/companies/:companyId/branches", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const r = await pool.query(
@@ -202,7 +229,6 @@ app.post("/companies/:companyId/branches", authRequired, requireRole("ADMIN"), a
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
 
-  // firma var mı
   const c = await pool.query(`SELECT id FROM companies WHERE id=$1 AND is_active=true`, [companyId]);
   if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
 
@@ -241,96 +267,73 @@ app.delete("/branches/:id", authRequired, requireRole("ADMIN"), async (req, res)
   res.json({ ok: true });
 });
 
-// ---- BALANCE helpers ----
-async function companyBalance(companyId) {
-  // SALE +, CASH_SALE +, DEBT_ADD +, PAYMENT -, RETURN -
-  const r = await pool.query(
-    `SELECT COALESCE(SUM(amount),0) AS bal
-     FROM ledger_entries
-     WHERE company_id=$1`,
-    [companyId]
-  );
-  return Number(r.rows[0].bal);
-}
-async function branchBalance(branchId) {
-  const r = await pool.query(
-    `SELECT COALESCE(SUM(amount),0) AS bal
-     FROM ledger_entries
-     WHERE branch_id=$1`,
-    [branchId]
-  );
-  return Number(r.rows[0].bal);
-}
-
 // ---- LEDGER ----
-// entry_type:
-// SALE (veresiye satış) -> + packs*price
-// CASH_SALE (peşin satış) -> + packs*price (aynı gün PAYMENT ile kapatabilir veya ayrı bırakabilir)
-// PAYMENT (tahsilat) -> -amount
-// RETURN (iade) -> - packs*price
-// DEBT_ADD (alacak/veresiye ekle) -> +amount (paketsiz)
+// server type’lar:
+// SALE, CASH_SALE, PAYMENT, RETURN, DEBT_ADD
 app.post("/ledger", authRequired, async (req, res) => {
-  const { companyId, branchId, type, packs, amount, note, entryDate } = req.body;
+  try {
+    const { companyId, branchId, type, packs, amount, note, entryDate } = req.body;
 
-  if (!["SALE","CASH_SALE","PAYMENT","RETURN","DEBT_ADD"].includes(type)) {
-    return res.status(400).json({ error: "Geçersiz type" });
-  }
+    if (!["SALE","CASH_SALE","PAYMENT","RETURN","DEBT_ADD"].includes(type)) {
+      return res.status(400).json({ error: "Geçersiz type" });
+    }
 
-  const cid = Number(companyId || 0);
-  const bid = branchId ? Number(branchId) : null;
-  if (!cid) return res.status(400).json({ error: "Firma seç" });
+    const cid = Number(companyId || 0);
+    const bid = branchId ? Number(branchId) : null;
+    if (!cid) return res.status(400).json({ error: "Firma seç" });
 
-  // firma var mı + fiyat
-  const c = await pool.query(
-    `SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true`,
-    [cid]
-  );
-  if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
-  const unitPrice = Number(c.rows[0].price_per_pack);
-
-  // şube doğrulama (opsiyonel)
-  if (bid) {
-    const b = await pool.query(
-      `SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true`,
-      [bid, cid]
+    const c = await pool.query(
+      `SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true`,
+      [cid]
     );
-    if (b.rowCount === 0) return res.status(400).json({ error: "Şube bu firmaya ait değil" });
+    if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
+    const unitPrice = Number(c.rows[0].price_per_pack || 0);
+
+    if (bid) {
+      const b = await pool.query(
+        `SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true`,
+        [bid, cid]
+      );
+      if (b.rowCount === 0) return res.status(400).json({ error: "Şube bu firmaya ait değil" });
+    }
+
+    const p = Number(packs || 0);
+    const a = Number(amount || 0);
+
+    let packsFinal = 0;
+    let unitPriceFinal = 0;
+    let amountSigned = 0;
+
+    if (type === "PAYMENT") {
+      if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
+      amountSigned = -Math.abs(a);
+    } else if (type === "DEBT_ADD") {
+      if (a <= 0) return res.status(400).json({ error: "Alacak/Veresiye tutarı gir" });
+      amountSigned = Math.abs(a);
+    } else {
+      if (p <= 0) return res.status(400).json({ error: "Paket gir" });
+      packsFinal = p;
+      unitPriceFinal = unitPrice;
+      const base = Math.abs(p * unitPrice);
+
+      if (type === "SALE" || type === "CASH_SALE") amountSigned = base;
+      if (type === "RETURN") amountSigned = -base;
+    }
+
+    const finalDate = (req.user.role === "ADMIN" && entryDate) ? entryDate : null;
+
+    const r = await pool.query(
+      `INSERT INTO ledger_entries(company_id, branch_id, entry_type, packs, unit_price, amount, note, created_by, entry_date)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, CURRENT_DATE))
+       RETURNING *`,
+      [cid, bid, type, packsFinal, unitPriceFinal, amountSigned, note || null, Number(req.user.uid), finalDate]
+    );
+
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error("LEDGER ERROR:", e);
+    res.status(500).json({ error: "Sunucu hatası (ledger)" });
   }
-
-  const p = Number(packs || 0);
-  const a = Number(amount || 0);
-
-  let packsFinal = 0;
-  let unitPriceFinal = 0;
-  let amountSigned = 0;
-
-  if (type === "PAYMENT") {
-    if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
-    amountSigned = -Math.abs(a);
-  } else if (type === "DEBT_ADD") {
-    if (a <= 0) return res.status(400).json({ error: "Alacak/Veresiye tutarı gir" });
-    amountSigned = Math.abs(a);
-  } else {
-    if (p <= 0) return res.status(400).json({ error: "Paket gir" });
-    packsFinal = p;
-    unitPriceFinal = unitPrice;
-    const base = Math.abs(p * unitPrice);
-
-    if (type === "SALE" || type === "CASH_SALE") amountSigned = base;
-    if (type === "RETURN") amountSigned = -base;
-  }
-
-  // sadece ADMIN geçmiş tarih girebilir
-  const finalDate = (req.user.role === "ADMIN" && entryDate) ? entryDate : null;
-
-  const r = await pool.query(
-    `INSERT INTO ledger_entries(company_id, branch_id, entry_type, packs, unit_price, amount, note, created_by, entry_date)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, CURRENT_DATE))
-     RETURNING *`,
-    [cid, bid, type, packsFinal, unitPriceFinal, amountSigned, note || null, Number(req.user.uid), finalDate]
-  );
-
-  res.json(r.rows[0]);
 });
 
 // ---- EXPENSES ----
@@ -368,47 +371,58 @@ app.post("/production", authRequired, async (req, res) => {
 });
 
 // ---- REPORTS ----
+// app.js şu alanları bekliyor: sales, creditSales, cashSales, payments, returns, expenses, productionPacks
 async function summaryBetween(from, to) {
-  const q = async (sql, params) => Number((await pool.query(sql, params)).rows[0].v);
+  const qNum = async (sql, params) => Number((await pool.query(sql, params)).rows[0].v);
 
-  const sales = await q(
+  const creditSales = await qNum(
     `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type IN ('SALE','CASH_SALE','DEBT_ADD') AND entry_date BETWEEN $1 AND $2`,
+     WHERE entry_type='SALE' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
-  const payments = await q(
+
+  const cashSales = await qNum(
+    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
+     WHERE entry_type='CASH_SALE' AND entry_date BETWEEN $1 AND $2`,
+    [from, to]
+  );
+
+  const sales = Number(creditSales) + Number(cashSales);
+
+  const paymentsRaw = await qNum(
     `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
      WHERE entry_type='PAYMENT' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
-  const returns = await q(
+  const payments = Math.abs(paymentsRaw);
+
+  const returnsRaw = await qNum(
     `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
      WHERE entry_type='RETURN' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
-  const expenses = await q(
+  const returns = Math.abs(returnsRaw);
+
+  const expenses = await qNum(
     `SELECT COALESCE(SUM(amount),0) v FROM expense_entries
      WHERE entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
-  const productionPacks = await q(
+
+  const productionPacks = await qNum(
     `SELECT COALESCE(SUM(packs),0) v FROM production_entries
      WHERE entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  return { from, to, sales, payments, returns, expenses, productionPacks };
+  return { from, to, sales, creditSales, cashSales, payments, returns, expenses, productionPacks };
 }
 
 app.get("/reports/today", authRequired, async (_req, res) => {
-  const r = await summaryBetween(
-    new Date().toISOString().slice(0,10),
-    new Date().toISOString().slice(0,10)
-  );
-  res.json(r);
+  const d = new Date().toISOString().slice(0,10);
+  res.json(await summaryBetween(d, d));
 });
 
-// /reports/range?from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get("/reports/range", authRequired, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
@@ -417,11 +431,9 @@ app.get("/reports/range", authRequired, async (req, res) => {
     return res.status(400).json({ error: "from/to formatı YYYY-MM-DD olmalı" });
   }
 
-  const data = await summaryBetween(from, to);
-  res.json(data);
+  res.json(await summaryBetween(from, to));
 });
 
-// /reports/month?ym=YYYY-MM
 app.get("/reports/month", authRequired, async (req, res) => {
   const ym = String(req.query.ym || "");
   if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: "ym formatı YYYY-MM olmalı" });
@@ -433,11 +445,10 @@ app.get("/reports/month", authRequired, async (req, res) => {
   );
   const to = toQ.rows[0].d.toISOString().slice(0,10);
 
-  const data = await summaryBetween(from, to);
-  res.json(data);
+  res.json(await summaryBetween(from, to));
 });
 
-// Firma ve şube toplamları (UI’da “Toplam / Şube” baloncukları için)
+// balances
 app.get("/balances/company/:companyId", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const bal = await companyBalance(companyId);
