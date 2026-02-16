@@ -200,45 +200,115 @@ GİDER: ${fmt(r.expenses)}
 `;
 }
 
-function toggleLedgerFields(){
-const selectedText = $("ledgerType").value;
-const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
+// ===============================
+// AYAR: 1 paket fiyatı (TL)
+// Bunu kendi fiyatına göre değiştir.
+// ===============================
+const PACK_PRICE = 120; // örnek: 120 TL
 
-const needPacks =
-  (entryType === "SALE_CREDIT" ||
-   entryType === "SALE_CASH" ||
-   entryType === "RETURN");
+function toggleLedgerFields() {
+  const selectedText = $("ledgerType").value;
 
-const needAmount =
-  (entryType === "RECEIVABLE" ||
-   entryType === "COLLECTION");
+  // Kullanıcıdan gelen seçenek yazısını DB entry_type'a çevir
+  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
 
-$("ledgerPacks").style.display  = needPacks ? "inline-block" : "none";
-$("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
+  // Paket girilecek tipler
+  // NOT: Peşin satışta da paket girilecek (tutarı biz hesaplayacağız)
+  const needPacks = (
+    entryType === "SALE_CREDIT" ||
+    entryType === "SALE_CASH" ||
+    entryType === "RETURN"
+  );
 
+  // Tutar input'u sadece tahsilat/alacak işlemlerinde manuel görünsün
+  // Peşin satışta TUTAR input'u görünmesin (biz hesaplayacağız)
+  const needAmountManual = (entryType === "RECEIVABLE" || entryType === "COLLECTION");
+
+  // Alanları aç/kapat
+  $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
+  $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
+
+  // Peşin satış seçildiyse, kullanıcıya küçük bilgi gösterelim (opsMsg üstünden)
+  if (entryType === "SALE_CASH") {
+    setMsg($("opsMsg"), `Peşin satış: Paket gir → Tutar otomatik (${PACK_PRICE} TL/paket)`, true);
+  }
 }
 
-async function saveLedger(){
+async function saveLedger() {
   const selectedText = $("ledgerType").value;
-const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
+  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
 
   const companyId = Number($("companySelect").value || 0);
-  const branchId = Number($("branchSelect").value || 0);
+  const branchId  = Number($("branchSelect").value || 0);
+
+  // Paket/tutar/not/tarih
   const packs = Number($("ledgerPacks").value || 0);
-  const amount = Number($("ledgerAmount").value || 0);
+  let amount  = Number($("ledgerAmount").value || 0);
+
   const note = $("ledgerNote").value || null;
   const entryDate = $("ledgerDate").value || null;
 
   if (!companyId) return alert("Firma seç");
-  if (!branchId) return alert("Şube seç");
+  if (!branchId)  return alert("Şube seç");
 
-  if ((entryType === "PAYMENT" || entryType === "DEBIT") && !amount) return alert("Tutar gir");
-  if ((entryType === "SALE_CREDIT" || entryType === "SALE_CASH" || entryType === "RETURN") && packs <= 0) return alert("Paket gir");
+  // -------------------------------
+  // KURALLAR
+  // -------------------------------
 
+  // 1) Peşin satış: sadece paket girilir, tutar otomatik hesaplanır
+  if (entryType === "SALE_CASH") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = packs * PACK_PRICE;
+
+    // İstersen arayüzde de göstereyim (input gizli olsa bile value set eder)
+    $("ledgerAmount").value = String(amount);
+  }
+
+  // 2) Veresiye satış: paket girilir, amount 0 kalır (rapor satıştan hesaplıyor)
+  if (entryType === "SALE_CREDIT") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = 0;
+    $("ledgerAmount").value = "0";
+  }
+
+  // 3) İade: paket girilir
+  if (entryType === "RETURN") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = 0;
+    $("ledgerAmount").value = "0";
+  }
+
+  // 4) Alacak / Tahsilat: manuel tutar girilir
+  if (entryType === "RECEIVABLE" || entryType === "COLLECTION") {
+    if (!amount || amount <= 0) return alert("Tutar gir");
+  }
+
+  // -------------------------------
+  // API'ye gönder
+  // type: entryType (DB CHECK constraint buna bakıyor)
+  // -------------------------------
   await api("/ledger", {
-    method:"POST",
-    body: JSON.stringify({ type: entryType, companyId, branchId, packs, amount, note, entryDate })
+    method: "POST",
+    body: JSON.stringify({
+      type: entryType,
+      companyId,
+      branchId,
+      packs,
+      amount,
+      note,
+      entryDate
+    })
   });
+
+  setMsg($("opsMsg"), "İşlem kaydedildi ✅", true);
+
+  // Kaydettikten sonra: şirket/şube toplamlarını ve bugünü yenile
+  try {
+    await loadCompanies();
+    await reportToday();
+  } catch (e) {}
+}
+
 
   setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
   $("ledgerPacks").value = "";
