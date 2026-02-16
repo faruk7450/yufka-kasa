@@ -214,9 +214,6 @@ function toggleLedgerFields() {
   $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
   $("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
 }
-
-}
-
 async function saveLedger() {
 const entryType = $("ledgerType").value;
 
