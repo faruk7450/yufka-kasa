@@ -1,283 +1,163 @@
-/* =========================
-   Yufka Kasa - app.js
-   Paket gir -> tutarı otomatik hesapla (satışlarda)
-   await sadece async fonksiyonlarda (syntax error yok)
-========================= */
-
 let token = localStorage.getItem("token") || "";
 let me = JSON.parse(localStorage.getItem("me") || "null");
 
-function $(id) { return document.getElementById(id); }
+function $(id){ return document.getElementById(id); }
+function todayYMD(){
+  const d = new Date();
+  const local = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+  return local.toISOString().slice(0,10); // yyyy-mm-dd
+}
 
-function setMsg(el, text, ok = true) {
-  if (!el) return;
+function setMsg(el, text, ok=true){
   el.className = ok ? "muted ok" : "muted err";
   el.textContent = text;
 }
 
-function todayYMD() {
-  const d = new Date();
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10); // yyyy-mm-dd
-}
-
-async function api(path, opts = {}) {
+async function api(path, opts={}){
   const headers = opts.headers || {};
   headers["Content-Type"] = "application/json";
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || "Hata");
+  if (!res.ok) throw new Error(data.error || "Hata");
   return data;
 }
 
-function fmt(n) {
+function fmt(n){
   const x = Number(n || 0);
   return x.toFixed(2);
 }
 
-/* ========= DB enum mapping (check constraint için) =========
-   UI text -> DB entry_type
-   NOT: DB’de izinli değerler bunlar olmalı:
-   SALE_CREDIT, SALE_CASH, RECEIVABLE, COLLECTION, RETURN
-*/
+// Entry type mapping (DB için kodlar)
 const ENTRY_TYPE_MAP = {
   "SATIŞ (Veresiye)": "SALE_CREDIT",
   "PEŞİN SATIŞ": "SALE_CASH",
   "ALACAK / VERESİYE (Tutar)": "RECEIVABLE",
   "TAHSİLAT (Tutar)": "COLLECTION",
-  "İADE": "RETURN",
+  "İADE": "RETURN"
 };
+function showLoggedIn(){
+  $("loginCard").classList.add("hidden");
+  $("mainCard").classList.remove("hidden");
+  $("reportsCard").classList.remove("hidden");
+  $("opsCard").classList.remove("hidden");
 
-/* ========= UI show/hide ========= */
+  $("userPill").textContent = `Giriş: ${me?.name || "-"} (${me?.role || "-"})`;
 
-function showLoggedOut() {
-  $("loginCard")?.classList.remove("hidden");
-  $("mainCard")?.classList.add("hidden");
-  $("reportsCard")?.classList.add("hidden");
-  $("opsCard")?.classList.add("hidden");
-  $("adminCard")?.classList.add("hidden");
+  if (me?.role === "ADMIN") $("adminCard").classList.remove("hidden");
+  else $("adminCard").classList.add("hidden");
 }
 
-function showLoggedIn() {
-  $("loginCard")?.classList.add("hidden");
-  $("mainCard")?.classList.remove("hidden");
-  $("reportsCard")?.classList.remove("hidden");
-  $("opsCard")?.classList.remove("hidden");
-
-  const isAdmin = me?.role === "ADMIN";
-  if (isAdmin) $("adminCard")?.classList.remove("hidden");
-  else $("adminCard")?.classList.add("hidden");
-
-  if ($("userPin")) {
-    $("userPin").textContent = `Giriş: ${me?.name || ""} (${me?.role || ""})`;
-  }
+function showLoggedOut(){
+  $("loginCard").classList.remove("hidden");
+  $("mainCard").classList.add("hidden");
+  $("reportsCard").classList.add("hidden");
+  $("opsCard").classList.add("hidden");
+  $("adminCard").classList.add("hidden");
 }
 
-function initDates() {
+function initDates(){
   const ymd = todayYMD();
 
-  // işlem tarihleri (her girişte bugüne gelsin)
-  ["ledgerDate", "expDate", "prodDate"].forEach((id) => {
-    const el = $(id);
-    if (el) el.value = ymd;
+  // İşlem tarihleri (personelde de bugüne gelsin)
+  ["ledgerDate","expDate","prodDate"].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.value = ymd;   // ✅ her seferinde bugünü bas
   });
 
-  // rapor tarihleri
-  if ($("fromDate")) $("fromDate").value = ymd;
-  if ($("toDate")) $("toDate").value = ymd;
-  if ($("ym")) $("ym").value = ymd.slice(0, 7);
-}
+  // Rapor tarihleri
+  const from = document.getElementById("fromDate");
+  const to   = document.getElementById("toDate");
+  if (from) from.value = ymd;
+  if (to)   to.value   = ymd;
 
-/* ========= Companies / Branches ========= */
+  // Aylık: yyyy-mm
+  const ym = document.getElementById("ym");
+  if (ym) ym.value = ymd.slice(0,7);
+}
 
 let companies = [];
 let branches = [];
 
-function getSelectedCompany() {
-  const id = Number($("companySelect")?.value || 0);
-  return companies.find(c => Number(c.id) === id) || null;
-}
-
-async function loadCompanies() {
+async function loadCompanies(){
   companies = await api("/companies");
   const sel = $("companySelect");
-  if (!sel) return;
-
   sel.innerHTML = "";
   for (const c of companies) {
     const opt = document.createElement("option");
-    opt.value = String(c.id);
-    const balance = (c.balance != null) ? fmt(c.balance) : "0.00";
-    opt.textContent = `${c.name} (Bakiye: ${balance})`;
+    opt.value = c.id;
+    opt.textContent = `${c.name} (Bakiye: ${fmt(c.balance)})`;
     sel.appendChild(opt);
   }
-
   if (companies.length) {
     sel.value = String(companies[0].id);
     await loadBranches();
+  } else {
+    $("branchSelect").innerHTML = "";
   }
 }
 
-async function loadBranches() {
-  const companyId = Number($("companySelect")?.value || 0);
-  const sel = $("branchSelect");
-  if (!sel) return;
-
-  sel.innerHTML = "";
-  branches = [];
+async function loadBranches(){
+  const companyId = Number($("companySelect").value || 0);
   if (!companyId) return;
 
   branches = await api(`/companies/${companyId}/branches`);
+  const sel = $("branchSelect");
+  sel.innerHTML = "";
   for (const b of branches) {
     const opt = document.createElement("option");
-    opt.value = String(b.id);
-    opt.textContent = b.full_name || b.name;
+    opt.value = b.id;
+    opt.textContent = b.name;
     sel.appendChild(opt);
   }
-
   if (branches.length) sel.value = String(branches[0].id);
-}
 
-/* ========= Paket -> Tutar otomatik =========
-   Satışlarda: amount = packs * company.price
-*/
-function updateAutoAmountFromPacks() {
-  const selectedText = $("ledgerType")?.value || "";
-  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
-
-  // sadece satış/iade (paket bazlı) otomatik hesap
-  const packBased = (entryType === "SALE_CREDIT" || entryType === "SALE_CASH" || entryType === "RETURN");
-
-  const packsEl = $("ledgerPacks");
-  const amountEl = $("ledgerAmount");
-  if (!packsEl || !amountEl) return;
-
-  if (!packBased) return;
-
-  const packs = Number(packsEl.value || 0);
-  const company = getSelectedCompany();
-  const price = Number(company?.price || company?.unit_price || 0);
-
-  const amount = packs * price;
-  amountEl.value = amount ? String(amount) : "0";
-}
-
-/* ========= Ledger fields visibility =========
-   Senin isteğin: satışlarda paket girilsin, tutar otomatik.
-   Alacak/Tahsilat: tutar girilsin.
-*/
-function toggleLedgerFields() {
-  const selectedText = $("ledgerType")?.value || "";
-  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
-
-  const packBased = (entryType === "SALE_CREDIT" || entryType === "SALE_CASH" || entryType === "RETURN");
-  const moneyBased = (entryType === "RECEIVABLE" || entryType === "COLLECTION");
-
-  const packsWrap = $("ledgerPacksWrap") || $("ledgerPacks")?.parentElement;
-  const amountWrap = $("ledgerAmountWrap") || $("ledgerAmount")?.parentElement;
-
-  if (packsWrap) packsWrap.style.display = packBased ? "inline-block" : "none";
-  if (amountWrap) amountWrap.style.display = moneyBased ? "inline-block" : "none";
-
-  // paket bazlıda tutar otomatik hesaplanacağı için amount input’u gizliysek bile value güncellensin
-  if (packBased) updateAutoAmountFromPacks();
-}
-
-/* ========= Save ledger ========= */
-
-async function saveLedger() {
-  try {
-    const selectedText = $("ledgerType")?.value || "";
-    const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
-
-    const companyId = Number($("companySelect")?.value || 0);
-    const branchId = Number($("branchSelect")?.value || 0);
-
-    const packs = Number($("ledgerPacks")?.value || 0);
-    const manualAmount = Number($("ledgerAmount")?.value || 0);
-
-    const note = $("ledgerNote")?.value || null;
-    const entryDate = $("ledgerDate")?.value || null;
-
-    if (!companyId) return alert("Firma seç");
-    if (!branchId) return alert("Şube seç");
-    if (!entryDate) return alert("Tarih seç");
-
-    // Paket bazlı: SALE_CREDIT / SALE_CASH / RETURN
-    if (entryType === "SALE_CREDIT" || entryType === "SALE_CASH" || entryType === "RETURN") {
-      if (packs <= 0) return alert("Paket gir (0'dan büyük)");
-      const company = getSelectedCompany();
-      const price = Number(company?.price || company?.unit_price || 0);
-      if (!price) return alert("Firma fiyatı (price) tanımlı değil. Admin'den fiyat gir.");
-
-      // otomatik tutar
-      const amount = packs * price;
-
-      await api("/ledger", {
-        method: "POST",
-        body: JSON.stringify({
-          type: entryType,
-          companyId,
-          branchId,
-          packs,
-          amount,
-          note,
-          entryDate,
-        })
-      });
-
-      setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
-      if ($("ledgerPacks")) $("ledgerPacks").value = "";
-      if ($("ledgerNote")) $("ledgerNote").value = "";
-
-      await loadCompanies();   // bakiye güncellensin
-      await reportToday();     // üst rapor güncellensin
-      return;
-    }
-
-    // Tutar bazlı: RECEIVABLE / COLLECTION
-    if (entryType === "RECEIVABLE" || entryType === "COLLECTION") {
-      if (manualAmount <= 0) return alert("Tutar gir (0'dan büyük)");
-
-      await api("/ledger", {
-        method: "POST",
-        body: JSON.stringify({
-          type: entryType,
-          companyId,
-          branchId,
-          packs: 0,
-          amount: manualAmount,
-          note,
-          entryDate,
-        })
-      });
-
-      setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
-      if ($("ledgerAmount")) $("ledgerAmount").value = "";
-      if ($("ledgerNote")) $("ledgerNote").value = "";
-
-      await loadCompanies();
-      await reportToday();
-      return;
-    }
-
-    // bilinmeyen type gelirse:
-    alert("Bilinmeyen işlem tipi: " + entryType);
-  } catch (e) {
-    console.error(e);
-    alert("Hata: " + (e.message || e));
+  // admin formunu doldur
+  const c = companies.find(x => x.id === companyId);
+  if (c) {
+    $("aCompanyId").value = c.id;
+    $("aCompanyName").value = c.name;
+    $("aCompanyPhone").value = c.phone || "";
+    $("aCompanyPrice").value = c.price_per_pack || 0;
   }
+
+  await refreshTotals();
 }
 
-/* ========= Reports ========= */
+async function refreshTotals(){
+  // Totaller: rapor range ile (bu ay) gösterelim (hızlı ve pratik)
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const to = now.toISOString().slice(0,10);
+  const r = await api(`/reports/range?from=${from}&to=${to}`);
 
-function renderToday(r) {
-  const box = $("todayBox") || $("reportBox");
-  if (!box) return;
+  // Company total: seçili firmanın bakiyesi zaten dropdown’da var, ama burada “aylık satış/tahsilat” istiyorsun.
+  // Şimdilik UI hızlı: toplam alanına bakiye yazacağız (ana ihtiyaç bu).
+  const companyId = Number($("companySelect").value || 0);
+  const c = companies.find(x => x.id === companyId);
+  $("companyTotal").textContent = fmt(c?.balance || 0);
 
-  box.textContent =
+  // Şube toplamı (bu ay) için basit endpoint yok → şimdilik 0 gösteriyoruz.
+  // İstersen sonraki adımda /reports/branch ekleyip bunu gerçek yaparız.
+  $("branchTotal").textContent = fmt(0);
+
+  // reportOut'a da en son alınan raporu bas
+  $("reportOut").textContent =
+`RAPOR (${r.from} → ${r.to})
+TOPLAM SATIŞ: ${fmt(r.sales)}
+- Veresiye Satış: ${fmt(r.creditSales)}
+- Peşin Satış: ${fmt(r.cashSales)}
+TAHSİLAT: ${fmt(r.payments)}
+İADE: ${fmt(r.returns)}
+GİDER: ${fmt(r.expenses)}
+ÜRETİM (paket): ${fmt(r.productionPacks)}
+`;
+}
+
+async function reportToday(){
+  const r = await api("/reports/today");
+  $("reportOut").textContent =
 `BUGÜN RAPORU
 TOPLAM SATIŞ: ${fmt(r.sales)}
 - Veresiye Satış: ${fmt(r.creditSales)}
@@ -285,55 +165,279 @@ TOPLAM SATIŞ: ${fmt(r.sales)}
 TAHSİLAT: ${fmt(r.payments)}
 İADE: ${fmt(r.returns)}
 GİDER: ${fmt(r.expenses)}
-ÜRETİM (paket): ${fmt(r.productionPacks)}`;
+ÜRETİM (paket): ${fmt(r.productionPacks)}
+`;
 }
 
-async function reportToday() {
-  try {
-    const companyId = Number($("companySelect")?.value || 0);
-    const branchId = Number($("branchSelect")?.value || 0);
-    const date = $("ledgerDate")?.value || todayYMD();
+async function reportRange(){
+  const from = $("fromDate").value;
+  const to = $("toDate").value;
+  const r = await api(`/reports/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  $("reportOut").textContent =
+`RAPOR (${r.from} → ${r.to})
+TOPLAM SATIŞ: ${fmt(r.sales)}
+- Veresiye Satış: ${fmt(r.creditSales)}
+- Peşin Satış: ${fmt(r.cashSales)}
+TAHSİLAT: ${fmt(r.payments)}
+İADE: ${fmt(r.returns)}
+GİDER: ${fmt(r.expenses)}
+ÜRETİM (paket): ${fmt(r.productionPacks)}
+`;
+}
 
-    const r = await api(`/reports/today?companyId=${companyId}&branchId=${branchId}&date=${date}`);
-    renderToday(r);
-  } catch (e) {
-    console.error(e);
-    // rapor gelmezse sessiz bırakma; yukarıda gözüksün
-    setMsg($("opMsg"), "Rapor alınamadı: " + (e.message || e), false);
+async function reportMonth(){
+  const ym = $("ym").value;
+  const r = await api(`/reports/month?ym=${encodeURIComponent(ym)}`);
+  $("reportOut").textContent =
+`AY RAPORU (${r.from} → ${r.to})
+TOPLAM SATIŞ: ${fmt(r.sales)}
+- Veresiye Satış: ${fmt(r.creditSales)}
+- Peşin Satış: ${fmt(r.cashSales)}
+TAHSİLAT: ${fmt(r.payments)}
+İADE: ${fmt(r.returns)}
+GİDER: ${fmt(r.expenses)}
+ÜRETİM (paket): ${fmt(r.productionPacks)}
+`;
+}
+
+// ===============================
+// AYAR: 1 paket fiyatı (TL)
+// Bunu kendi fiyatına göre değiştir.
+// ===============================
+const PACK_PRICE = 120; // örnek: 120 TL
+
+function toggleLedgerFields() {
+  const selectedText = $("ledgerType").value;
+
+  // Kullanıcıdan gelen seçenek yazısını DB entry_type'a çevir
+  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
+
+  // Paket girilecek tipler
+  // NOT: Peşin satışta da paket girilecek (tutarı biz hesaplayacağız)
+  const needPacks = (
+    entryType === "SALE_CREDIT" ||
+    entryType === "SALE_CASH" ||
+    entryType === "RETURN"
+  );
+
+  // Tutar input'u sadece tahsilat/alacak işlemlerinde manuel görünsün
+  // Peşin satışta TUTAR input'u görünmesin (biz hesaplayacağız)
+  const needAmountManual = (entryType === "RECEIVABLE" || entryType === "COLLECTION");
+
+  // Alanları aç/kapat
+  $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
+  $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
+
+  // Peşin satış seçildiyse, kullanıcıya küçük bilgi gösterelim (opsMsg üstünden)
+  if (entryType === "SALE_CASH") {
+    setMsg($("opsMsg"), `Peşin satış: Paket gir → Tutar otomatik (${PACK_PRICE} TL/paket)`, true);
   }
 }
 
-/* ========= Login ========= */
+async function saveLedger() {
+  const selectedText = $("ledgerType").value;
+  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
 
-async function login() {
+  const companyId = Number($("companySelect").value || 0);
+  const branchId  = Number($("branchSelect").value || 0);
+
+  // Paket/tutar/not/tarih
+  const packs = Number($("ledgerPacks").value || 0);
+  let amount  = Number($("ledgerAmount").value || 0);
+
+  const note = $("ledgerNote").value || null;
+  const entryDate = $("ledgerDate").value || null;
+
+  if (!companyId) return alert("Firma seç");
+  if (!branchId)  return alert("Şube seç");
+
+  // -------------------------------
+  // KURALLAR
+  // -------------------------------
+
+  // 1) Peşin satış: sadece paket girilir, tutar otomatik hesaplanır
+  if (entryType === "SALE_CASH") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = packs * PACK_PRICE;
+
+    // İstersen arayüzde de göstereyim (input gizli olsa bile value set eder)
+    $("ledgerAmount").value = String(amount);
+  }
+
+  // 2) Veresiye satış: paket girilir, amount 0 kalır (rapor satıştan hesaplıyor)
+  if (entryType === "SALE_CREDIT") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = 0;
+    $("ledgerAmount").value = "0";
+  }
+
+  // 3) İade: paket girilir
+  if (entryType === "RETURN") {
+    if (!packs || packs <= 0) return alert("Paket gir");
+    amount = 0;
+    $("ledgerAmount").value = "0";
+  }
+
+  // 4) Alacak / Tahsilat: manuel tutar girilir
+  if (entryType === "RECEIVABLE" || entryType === "COLLECTION") {
+    if (!amount || amount <= 0) return alert("Tutar gir");
+  }
+
+  // -------------------------------
+  // API'ye gönder
+  // type: entryType (DB CHECK constraint buna bakıyor)
+  // -------------------------------
+  await api("/ledger", {
+    method: "POST",
+    body: JSON.stringify({
+      type: entryType,
+      companyId,
+      branchId,
+      packs,
+      amount,
+      note,
+      entryDate
+    })
+  });
+
+  setMsg($("opsMsg"), "İşlem kaydedildi ✅", true);
+
+  // Kaydettikten sonra: şirket/şube toplamlarını ve bugünü yenile
   try {
-    const pin = $("pin")?.value?.trim();
-    if (!pin) return alert("PIN gir");
+    await loadCompanies();
+    await reportToday();
+  } catch (e) {}
+}
 
-    const out = await api("/login", {
-      method: "POST",
+
+  setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
+  $("ledgerPacks").value = "";
+  $("ledgerAmount").value = "";
+  $("ledgerNote").value = "";
+  await loadCompanies();
+  await reportToday();
+}
+
+async function saveExpense(){
+  const amount = Number($("expAmount").value || 0);
+  const note = $("expNote").value || "";
+  const entryDate = $("expDate").value || null;
+  if (amount <= 0) return alert("Gider tutarı gir");
+
+  await api("/expenses", {
+    method:"POST",
+    body: JSON.stringify({ amount, note, entryDate })
+  });
+
+  setMsg($("opMsg"), "Gider kaydedildi ✅", true);
+  await reportToday();
+}
+
+async function saveProd(){
+  const packs = Number($("prodPacks").value || 0);
+  const note = $("prodNote").value || null;
+  const entryDate = $("prodDate").value || null;
+  if (packs <= 0) return alert("Üretim paket gir");
+
+  await api("/production", {
+    method:"POST",
+    body: JSON.stringify({ packs, note, entryDate })
+  });
+
+  setMsg($("opMsg"), "Üretim kaydedildi ✅", true);
+  await reportToday();
+}
+
+// ---- ADMIN ----
+async function adminSaveCompany(){
+  const id = Number($("aCompanyId").value || 0);
+  const name = $("aCompanyName").value.trim();
+  const phone = $("aCompanyPhone").value.trim();
+  const pricePerPack = Number($("aCompanyPrice").value || 0);
+
+  if (!name) return alert("Firma adı yaz");
+
+  if (!id) {
+    await api("/companies", {
+      method:"POST",
+      body: JSON.stringify({ name, phone: phone || null, pricePerPack })
+    });
+  } else {
+    await api(`/companies/${id}`, {
+      method:"PUT",
+      body: JSON.stringify({ name, phone: phone || null, pricePerPack })
+    });
+  }
+
+  setMsg($("adminMsg"), "Firma kaydedildi ✅", true);
+  await loadCompanies();
+}
+
+async function adminDeleteCompany(){
+  const id = Number($("aCompanyId").value || 0);
+  if (!id) return alert("Firma ID gerekli");
+  if (!confirm("Firma pasife alınacak. Emin misin?")) return;
+
+  await api(`/companies/${id}`, { method:"DELETE" });
+  setMsg($("adminMsg"), "Firma kaldırıldı ✅", true);
+  $("aCompanyId").value = "";
+  $("aCompanyName").value = "";
+  $("aCompanyPhone").value = "";
+  $("aCompanyPrice").value = "";
+  await loadCompanies();
+}
+
+async function adminAddBranch(){
+  const companyId = Number($("companySelect").value || 0);
+  const name = $("aBranchName").value.trim();
+  if (!companyId) return alert("Firma seç");
+  if (!name) return alert("Şube adı yaz");
+
+  await api(`/companies/${companyId}/branches`, {
+    method:"POST",
+    body: JSON.stringify({ name })
+  });
+
+  $("aBranchName").value = "";
+  setMsg($("adminMsg"), "Şube eklendi ✅", true);
+  await loadBranches();
+}
+
+async function adminDeleteBranch(){
+  const id = Number($("aBranchId").value || 0);
+  if (!id) return alert("Şube ID yaz");
+  if (!confirm("Şube pasife alınacak. Emin misin?")) return;
+
+  await api(`/branches/${id}`, { method:"DELETE" });
+  $("aBranchId").value = "";
+  setMsg($("adminMsg"), "Şube kaldırıldı ✅", true);
+  await loadBranches();
+}
+
+// ---- AUTH ----
+async function login(){
+  try{
+    const pin = $("pin").value;
+    const r = await api("/auth/login", {
+      method:"POST",
       body: JSON.stringify({ pin })
     });
-
-    token = out.token;
+    token = r.token;
+    me = r.user;
     localStorage.setItem("token", token);
-
-    me = await api("/me");
     localStorage.setItem("me", JSON.stringify(me));
+    setMsg($("loginMsg"), "Giriş başarılı ✅", true);
 
-    initDates();
     showLoggedIn();
-
+    initDates();
     await loadCompanies();
-    toggleLedgerFields();
     await reportToday();
-  } catch (e) {
-    console.error(e);
-    alert("Giriş hatası: " + (e.message || e));
+  }catch(e){
+    setMsg($("loginMsg"), e.message, false);
   }
 }
 
-function logout() {
+function logout(){
   token = "";
   me = null;
   localStorage.removeItem("token");
@@ -341,64 +445,75 @@ function logout() {
   showLoggedOut();
 }
 
-/* ========= Bind events ========= */
+window.addEventListener("load", async () => {
+  $("btnLogin").addEventListener("click", login);
+  $("btnLogout").addEventListener("click", logout);
 
-function bindUI() {
-  $("btnLogin")?.addEventListener("click", login);
+  $("btnToday").addEventListener("click", async () => { try{ await reportToday(); }catch(e){ alert(e.message); } });
+  $("btnRange").addEventListener("click", async () => { try{ await reportRange(); }catch(e){ alert(e.message); } });
+  $("btnMonth").addEventListener("click", async () => { try{ await reportMonth(); }catch(e){ alert(e.message); } });
 
-  $("companySelect")?.addEventListener("change", async () => {
-    await loadBranches();
-    toggleLedgerFields();
-    await reportToday();
+  $("companySelect").addEventListener("change", async () => { try{ await loadBranches(); }catch(e){ alert(e.message); } });
+  $("branchSelect").addEventListener("change", async () => { try{ await refreshTotals(); }catch(e){ alert(e.message); } });
+
+  $("btnReloadAll").addEventListener("click", async () => {
+    try { await loadCompanies(); await reportToday(); setMsg($("opMsg"), "Yenilendi ✅", true); }
+    catch(e){ alert(e.message); }
   });
 
-  $("branchSelect")?.addEventListener("change", async () => {
-    await reportToday();
-  });
+  $("ledgerType").addEventListener("change", toggleLedgerFields);
+  $("btnLedger").addEventListener("click", async () => { try{ await saveLedger(); }catch(e){ alert(e.message); } });
 
-  $("ledgerType")?.addEventListener("change", () => {
-    toggleLedgerFields();
-  });
+  $("btnExpense").addEventListener("click", async () => { try{ await saveExpense(); }catch(e){ alert(e.message); } });
+  $("btnProd").addEventListener("click", async () => { try{ await saveProd(); }catch(e){ alert(e.message); } });
 
-  $("ledgerPacks")?.addEventListener("input", () => {
-    updateAutoAmountFromPacks();
-  });
+  $("btnCompanySave").addEventListener("click", async () => { try{ await adminSaveCompany(); }catch(e){ alert(e.message); } });
+  $("btnCompanyDelete").addEventListener("click", async () => { try{ await adminDeleteCompany(); }catch(e){ alert(e.message); } });
 
-  $("btnSaveLedger")?.addEventListener("click", saveLedger);
-  $("btnRefresh")?.addEventListener("click", async () => {
-    await loadCompanies();
-    await reportToday();
-    setMsg($("opMsg"), "Yenilendi ✅", true);
-  });
+  $("btnBranchAdd").addEventListener("click", async () => { try{ await adminAddBranch(); }catch(e){ alert(e.message); } });
+  $("btnBranchDelete").addEventListener("click", async () => { try{ await adminDeleteBranch(); }catch(e){ alert(e.message); } });
 
-  $("btnLogout")?.addEventListener("click", logout);
-}
+  toggleLedgerFields();
 
-/* ========= Boot ========= */
-
-document.addEventListener("DOMContentLoaded", async () => {
-  bindUI();
-  initDates();
-
-  // type dropdown defaultları
-  if ($("ledgerType") && !$("ledgerType").value) {
-    $("ledgerType").value = "PEŞİN SATIŞ";
-  }
-
-  try {
-    // token varsa otomatik giriş
-    if (token) {
-      me = await api("/me");
-      localStorage.setItem("me", JSON.stringify(me));
-      showLoggedIn();
+  if (token && me) {
+    showLoggedIn();
+    applyRoleRestrictions();
+    initDates();
+    try {
       await loadCompanies();
-      toggleLedgerFields();
       await reportToday();
-    } else {
-      showLoggedOut();
+    } catch {
+      logout();
     }
-  } catch (e) {
-    console.error(e);
-    logout();
+  } else {
+    showLoggedOut();
   }
 });
+
+function applyRoleRestrictions() {
+  const isAdmin = me?.role === "ADMIN";
+
+  // Tarih alanlarını kilitle
+  const dateIds = ["ledgerDate", "expDate", "prodDate", "fromDate", "toDate", "ym"];
+  dateIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !isAdmin;
+    if (!isAdmin) el.style.opacity = "0.7";
+  });
+
+  // Personelde sadece Bugün Raporu kalsın
+  if (!isAdmin) {
+    const btnRange = document.getElementById("btnRange");
+    const btnMonth = document.getElementById("btnMonth");
+    const from = document.getElementById("fromDate");
+    const to = document.getElementById("toDate");
+    const ym = document.getElementById("ym");
+
+    if (btnRange) btnRange.style.display = "none";
+    if (btnMonth) btnMonth.style.display = "none";
+    if (from) from.style.display = "none";
+    if (to) to.style.display = "none";
+    if (ym) ym.style.display = "none";
+  }
+}
