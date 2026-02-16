@@ -137,19 +137,21 @@ app.post("/auth/login", async (req, res) => {
 app.get("/companies", authRequired, async (_req, res) => {
   const r = await pool.query(`
     SELECT
-      c.id, c.name, c.phone, c.price_per_pack,
-      COALESCE(SUM(le.amount), 0) AS balance
+      c.id,
+      c.name,
+      c.phone,
+      c.price_per_pack,
+      COALESCE((
+        SELECT SUM(le.amount)
+        FROM ledger_entries le
+        WHERE le.company_id = c.id
+          AND le.entry_type IN ('SALE','DEBT_ADD','PAYMENT','RETURN') -- ✅ CASH_SALE YOK
+      ), 0) AS balance
     FROM companies c
-    LEFT JOIN ledger_entries le ON le.company_id = c.id
     WHERE c.is_active=true
-    GROUP BY c.id
     ORDER BY c.name
   `);
-  res.json(r.rows.map(x => ({
-    ...x,
-    price_per_pack: Number(x.price_per_pack || 0),
-    balance: Number(x.balance || 0)
-  })));
+  res.json(r.rows);
 });
 
 app.post("/companies", authRequired, requireRole("ADMIN"), async (req, res) => {
