@@ -29,6 +29,14 @@ function fmt(n){
   return x.toFixed(2);
 }
 
+// Entry type mapping (DB için kodlar)
+const ENTRY_TYPE_MAP = {
+  "SATIŞ (Veresiye)": "SALE_CREDIT",
+  "PEŞİN SATIŞ": "SALE_CASH",
+  "ALACAK / VERESİYE (Tutar)": "RECEIVABLE",
+  "TAHSİLAT (Tutar)": "COLLECTION",
+  "İADE": "RETURN"
+};
 function showLoggedIn(){
   $("loginCard").classList.add("hidden");
   $("mainCard").classList.remove("hidden");
@@ -193,7 +201,8 @@ GİDER: ${fmt(r.expenses)}
 }
 
 function toggleLedgerFields(){
-  const type = $("ledgerType").value;
+  const selectedText = $("ledgerType").value;
+const type = ENTRY_TYPE_MAP[selectedText] || selectedText;
   const needPacks = (type === "SALE_CREDIT" || type === "CASH_SALE" || type === "RETURN");
   const needAmount = (type === "PAYMENT" || type === "DEBIT");
 
@@ -202,7 +211,9 @@ function toggleLedgerFields(){
 }
 
 async function saveLedger(){
-  const type = $("ledgerType").value;
+  const selectedText = $("ledgerType").value;
+const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
+
   const companyId = Number($("companySelect").value || 0);
   const branchId = Number($("branchSelect").value || 0);
   const packs = Number($("ledgerPacks").value || 0);
@@ -213,12 +224,12 @@ async function saveLedger(){
   if (!companyId) return alert("Firma seç");
   if (!branchId) return alert("Şube seç");
 
-  if ((type === "PAYMENT" || type === "DEBIT") && !amount) return alert("Tutar gir");
-  if ((type === "SALE_CREDIT" || type === "CASH_SALE" || type === "RETURN") && packs <= 0) return alert("Paket gir");
+  if ((entryType === "PAYMENT" || entryType === "DEBIT") && !amount) return alert("Tutar gir");
+  if ((entryType === "SALE_CREDIT" || entryType === "CASH_SALE" || entryType === "RETURN") && packs <= 0) return alert("Paket gir");
 
   await api("/ledger", {
     method:"POST",
-    body: JSON.stringify({ type, companyId, branchId, packs, amount, note, entryDate })
+    body: JSON.stringify({ type: entryType, companyId, branchId, packs, amount, note, entryDate })
   });
 
   setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
