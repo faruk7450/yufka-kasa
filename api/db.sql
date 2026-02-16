@@ -71,3 +71,15 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS price_per_pack numeric(12,2) NOT 
 ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS branch_id bigint;
 
 COMMIT;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_entry_type_check'
+  ) THEN
+    ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_entry_type_check;
+  END IF;
+
+  ALTER TABLE ledger_entries
+    ADD CONSTRAINT ledger_entries_entry_type_check
+    CHECK (entry_type IN ('SALE','CASH_SALE','PAYMENT','RETURN','DEBT_ADD'));
+END $$;
