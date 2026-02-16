@@ -419,8 +419,11 @@ async function summaryBetween(from, to) {
 }
 
 app.get("/reports/today", authRequired, async (_req, res) => {
-  const d = new Date().toISOString().slice(0,10);
-  const r = await summaryBetween(d, d);
+  // ✅ DB'nin kendi saatine göre "bugün" (CURRENT_DATE) kullan
+  const d = await pool.query(`SELECT CURRENT_DATE::text AS d`);
+  const day = d.rows[0].d; // "YYYY-MM-DD"
+
+  const r = await summaryBetween(day, day);
   res.json(r);
 });
 
