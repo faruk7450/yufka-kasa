@@ -200,27 +200,26 @@ GİDER: ${fmt(r.expenses)}
 // ===============================
 const PACK_PRICE = 120; // örnek: 120 TL
 function toggleLedgerFields() {
-  const entryType = $("ledgerType").value;
+  const entryType = $("ledgerType").value; // direkt value
 
   const needPacks =
     entryType === "SALE_CREDIT" ||
     entryType === "CASH_SALE" ||
     entryType === "RETURN";
 
-  const needAmount =
-    entryType === "DEBIT" ||
-    entryType === "PAYMENT";
+  const needAmountManual =
+    entryType === "DEBIT" || entryType === "PAYMENT";
 
   $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
-  $("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
+  $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
 }
+
 async function saveLedger() {
-const entryType = $("ledgerType").value;
+  const entryType = $("ledgerType").value;
 
   const companyId = Number($("companySelect").value || 0);
   const branchId  = Number($("branchSelect").value || 0);
 
-  // Paket/tutar/not/tarih
   const packs = Number($("ledgerPacks").value || 0);
   let amount  = Number($("ledgerAmount").value || 0);
 
@@ -230,18 +229,37 @@ const entryType = $("ledgerType").value;
   if (!companyId) return alert("Firma seç");
   if (!branchId)  return alert("Şube seç");
 
-  // -------------------------------
-  // KURALLAR
-  // -------------------------------
-
-  // 1) Peşin satış: sadece paket girilir, tutar otomatik hesaplanır
-  if (entryType === "SALE_CASH") {
-    if (!packs || packs <= 0) return alert("Paket gir");
+  // Peşin satış: paket gir -> tutar otomatik
+  if (entryType === "CASH_SALE") {
+    if (packs <= 0) return alert("Paket gir");
     amount = packs * PACK_PRICE;
-
-    // İstersen arayüzde de göstereyim (input gizli olsa bile value set eder)
-    $("ledgerAmount").value = String(amount);
   }
+
+  // Veresiye satış / iade: paket şart, tutar 0
+  if (entryType === "SALE_CREDIT" || entryType === "RETURN") {
+    if (packs <= 0) return alert("Paket gir");
+    amount = 0;
+  }
+
+  // Alacak / Tahsilat: tutar şart
+  if (entryType === "DEBIT" || entryType === "PAYMENT") {
+    if (amount <= 0) return alert("Tutar gir");
+  }
+
+  await api("/ledger", {
+    method: "POST",
+    body: JSON.stringify({ type: entryType, companyId, branchId, packs, amount, note, entryDate })
+  });
+
+  setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
+  $("ledgerPacks").value = "";
+  $("ledgerAmount").value = "";
+  $("ledgerNote").value = "";
+
+  await loadCompanies();
+  await reportToday();
+}
+
 
   // 2) Veresiye satış: paket girilir, amount 0 kalır (rapor satıştan hesaplıyor)
   if (entryType === "SALE_CREDIT") {
