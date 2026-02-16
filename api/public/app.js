@@ -200,15 +200,16 @@ GİDER: ${fmt(r.expenses)}
 // ===============================
 const PACK_PRICE = 120; // örnek: 120 TL
 function toggleLedgerFields() {
-  const entryType = $("ledgerType").value; // direkt value
+  const entryType = $("ledgerType").value;
 
   const needPacks =
-    entryType === "SALE_CREDIT" ||
+    entryType === "SALE" ||
     entryType === "CASH_SALE" ||
     entryType === "RETURN";
 
   const needAmountManual =
-    entryType === "DEBIT" || entryType === "PAYMENT";
+    entryType === "DEBT_ADD" ||
+    entryType === "PAYMENT";
 
   $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
   $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
