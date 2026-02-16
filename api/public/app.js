@@ -30,13 +30,7 @@ function fmt(n){
 }
 
 // Entry type mapping (DB için kodlar)
-const ENTRY_TYPE_MAP = {
-  "SATIŞ (Veresiye)": "SALE_CREDIT",
-  "PEŞİN SATIŞ": "SALE_CASH",
-  "ALACAK / VERESİYE (Tutar)": "RECEIVABLE",
-  "TAHSİLAT (Tutar)": "COLLECTION",
-  "İADE": "RETURN"
-};
+
 function showLoggedIn(){
   $("loginCard").classList.add("hidden");
   $("mainCard").classList.remove("hidden");
@@ -205,38 +199,26 @@ GİDER: ${fmt(r.expenses)}
 // Bunu kendi fiyatına göre değiştir.
 // ===============================
 const PACK_PRICE = 120; // örnek: 120 TL
-
 function toggleLedgerFields() {
-  const selectedText = $("ledgerType").value;
+  const entryType = $("ledgerType").value;
 
-  // Kullanıcıdan gelen seçenek yazısını DB entry_type'a çevir
-  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
-
-  // Paket girilecek tipler
-  // NOT: Peşin satışta da paket girilecek (tutarı biz hesaplayacağız)
-  const needPacks = (
+  const needPacks =
     entryType === "SALE_CREDIT" ||
-    entryType === "SALE_CASH" ||
-    entryType === "RETURN"
-  );
+    entryType === "CASH_SALE" ||
+    entryType === "RETURN";
 
-  // Tutar input'u sadece tahsilat/alacak işlemlerinde manuel görünsün
-  // Peşin satışta TUTAR input'u görünmesin (biz hesaplayacağız)
-  const needAmountManual = (entryType === "RECEIVABLE" || entryType === "COLLECTION");
+  const needAmount =
+    entryType === "DEBIT" ||
+    entryType === "PAYMENT";
 
-  // Alanları aç/kapat
   $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
-  $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
+  $("ledgerAmount").style.display = needAmount ? "inline-block" : "none";
+}
 
-  // Peşin satış seçildiyse, kullanıcıya küçük bilgi gösterelim (opsMsg üstünden)
-  if (entryType === "SALE_CASH") {
-    setMsg($("opsMsg"), `Peşin satış: Paket gir → Tutar otomatik (${PACK_PRICE} TL/paket)`, true);
-  }
 }
 
 async function saveLedger() {
-  const selectedText = $("ledgerType").value;
-  const entryType = ENTRY_TYPE_MAP[selectedText] || selectedText;
+const entryType = $("ledgerType").value;
 
   const companyId = Number($("companySelect").value || 0);
   const branchId  = Number($("branchSelect").value || 0);
