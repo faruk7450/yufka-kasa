@@ -251,6 +251,8 @@ async function saveLedger() {
     body: JSON.stringify({ type: entryType, companyId, branchId, packs, amount, note, entryDate })
   });
 
+  {
+    
   setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
   $("ledgerPacks").value = "";
   $("ledgerAmount").value = "";
