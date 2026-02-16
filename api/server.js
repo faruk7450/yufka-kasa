@@ -331,9 +331,13 @@ app.post("/ledger", authRequired, async (req, res) => {
 
     res.json(r.rows[0]);
   } catch (e) {
-    console.error("LEDGER ERROR:", e);
-    res.status(500).json({ error: "Sunucu hatası (ledger)" });
-  }
+  console.error("LEDGER ERROR:", e);
+  res.status(500).json({
+    error: "Sunucu hatası (ledger)",
+    detail: e?.message || String(e)
+  });
+}
+
 });
 
 // ---- EXPENSES ----
