@@ -1,85 +1,70 @@
-BEGIN;
-
--- USERS
+-- users
 CREATE TABLE IF NOT EXISTS users (
-  id           bigserial PRIMARY KEY,
-  name         text NOT NULL,
-  role         text NOT NULL CHECK (role IN ('ADMIN','STAFF_CASH','STAFF')),
-  pin_hash     text NOT NULL,
-  is_active    boolean NOT NULL DEFAULT true,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('ADMIN','STAFF','STAFF_CASH')),
+  pin_hash TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- COMPANIES (FİRMA)
+-- companies
 CREATE TABLE IF NOT EXISTS companies (
-  id           bigserial PRIMARY KEY,
-  name         text NOT NULL UNIQUE,
-  phone        text,
-  price_per_pack numeric(12,2) NOT NULL DEFAULT 0,
-  is_active    boolean NOT NULL DEFAULT true,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  phone TEXT,
+  price_per_pack NUMERIC(12,2) NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- BRANCHES (ŞUBE)
+-- branches
 CREATE TABLE IF NOT EXISTS branches (
-  id           bigserial PRIMARY KEY,
-  company_id   bigint NOT NULL REFERENCES companies(id),
-  name         text NOT NULL,
-  is_active    boolean NOT NULL DEFAULT true,
-  created_at   timestamptz NOT NULL DEFAULT now(),
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  name TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP NOT NULL DEFAULT now(),
   UNIQUE(company_id, name)
 );
 
--- LEDGER (SATIŞ / TAHSİLAT / İADE / VERESİYE)
+-- ledger_entries
 CREATE TABLE IF NOT EXISTS ledger_entries (
-  id           bigserial PRIMARY KEY,
-  company_id   bigint NOT NULL REFERENCES companies(id),
-  branch_id    bigint REFERENCES branches(id),
-  entry_type   text NOT NULL CHECK (entry_type IN ('SALE','CASH_SALE','PAYMENT','RETURN','DEBT_ADD')),
-  packs        numeric(12,2) NOT NULL DEFAULT 0,
-  unit_price   numeric(12,2) NOT NULL DEFAULT 0,
-  amount       numeric(12,2) NOT NULL DEFAULT 0,
-  note         text,
-  created_by   bigint NOT NULL REFERENCES users(id),
-  entry_date   date NOT NULL DEFAULT CURRENT_DATE,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id),
+  branch_id INTEGER REFERENCES branches(id),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('SALE','CASH_SALE','PAYMENT','RETURN','DEBT_ADD')),
+  packs INTEGER NOT NULL DEFAULT 0,
+  unit_price NUMERIC(12,2) NOT NULL DEFAULT 0,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- EXPENSE
+CREATE INDEX IF NOT EXISTS idx_ledger_company_date ON ledger_entries(company_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_ledger_branch_date  ON ledger_entries(branch_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_ledger_type_date    ON ledger_entries(entry_type, entry_date);
+
+-- expenses
 CREATE TABLE IF NOT EXISTS expense_entries (
-  id           bigserial PRIMARY KEY,
-  amount       numeric(12,2) NOT NULL,
-  note         text,
-  created_by   bigint NOT NULL REFERENCES users(id),
-  entry_date   date NOT NULL DEFAULT CURRENT_DATE,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_expense_date ON expense_entries(entry_date);
 
--- PRODUCTION
+-- production
 CREATE TABLE IF NOT EXISTS production_entries (
-  id           bigserial PRIMARY KEY,
-  packs        numeric(12,2) NOT NULL,
-  note         text,
-  created_by   bigint NOT NULL REFERENCES users(id),
-  entry_date   date NOT NULL DEFAULT CURRENT_DATE,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  packs INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
 );
-
--- Güvenli kolon eklemeleri (eski DB'de yoksa ekler)
-ALTER TABLE companies ADD COLUMN IF NOT EXISTS phone text;
-ALTER TABLE companies ADD COLUMN IF NOT EXISTS price_per_pack numeric(12,2) NOT NULL DEFAULT 0;
-ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS branch_id bigint;
-
-COMMIT;
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'ledger_entries_entry_type_check'
-  ) THEN
-    ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_entry_type_check;
-  END IF;
-
-  ALTER TABLE ledger_entries
-    ADD CONSTRAINT ledger_entries_entry_type_check
-    CHECK (entry_type IN ('SALE','CASH_SALE','PAYMENT','RETURN','DEBT_ADD'));
-END $$;
+CREATE INDEX IF NOT EXISTS idx_prod_date ON production_entries(entry_date);
