@@ -9,15 +9,19 @@ app.use(express.json());
 
 // ---- CORS ----
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
-  .split(",").map(s => s.trim()).filter(Boolean);
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.length === 0) return cb(null, true);
-    return cb(null, allowedOrigins.includes(origin));
-  }
-}));
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.length === 0) return cb(null, true);
+      return cb(null, allowedOrigins.includes(origin));
+    }
+  })
+);
 
 const { Pool } = pg;
 
@@ -28,9 +32,10 @@ if (!process.env.DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.PGSSL_DISABLE_VERIFY === "1"
-    ? { rejectUnauthorized: false }
-    : undefined
+  ssl:
+    process.env.PGSSL_DISABLE_VERIFY === "1"
+      ? { rejectUnauthorized: false }
+      : undefined
 });
 
 // ---- JWT ----
@@ -61,17 +66,19 @@ function authRequired(req, res, next) {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "Auth gerekli" });
-    if (!roles.includes(req.user.role)) return res.status(403).json({ error: "Yetki yok" });
+    if (!roles.includes(req.user.role))
+      return res.status(403).json({ error: "Yetki yok" });
     next();
   };
 }
 
-// ---- DB init ----
+// ---- DB init (veri silmez) ----
 async function initDb() {
   const fs = await import("fs");
   const sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
   await pool.query(sql);
 
+  // kullanıcılar (yoksa ekle)
   const adminPin = String(process.env.ADMIN_PIN || "1234");
   const staffCashPin = String(process.env.STAFF_CASH_PIN || "1111");
   const staffPin = String(process.env.STAFF_PIN || "2222");
@@ -102,7 +109,7 @@ async function initDb() {
   );
 }
 
-initDb().catch((e) => console.error("DB init hata:", e));
+initDb().catch(e => console.error("DB init hata:", e));
 
 // ---- Static UI ----
 app.use(express.static(new URL("./public/", import.meta.url).pathname));
@@ -126,122 +133,17 @@ app.post("/auth/login", async (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 });
 
-// ---- COMPANIES ----
-app.get("/companies", authRequired, async (_req, res) => {
-  const r = await pool.query(`
-    SELECT id, name, phone, price_per_pack
-    FROM companies
-    WHERE is_active=true
-    ORDER BY name
-  `);
-  res.json(r.rows);
-});
-
-app.post("/companies", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const { name, phone, pricePerPack } = req.body;
-  const nm = String(name || "").trim();
-  if (!nm) return res.status(400).json({ error: "Firma adı gerekli" });
-
-  const r = await pool.query(
-    `INSERT INTO companies(name, phone, price_per_pack)
-     VALUES($1,$2,$3)
-     ON CONFLICT (name) DO UPDATE
-       SET phone=EXCLUDED.phone,
-           price_per_pack=EXCLUDED.price_per_pack,
-           is_active=true
-     RETURNING *`,
-    [nm, phone || null, Number(pricePerPack || 0)]
-  );
-  res.json(r.rows[0]);
-});
-
-app.put("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const id = Number(req.params.id);
-  const { name, phone, pricePerPack } = req.body;
-  const nm = String(name || "").trim();
-  if (!nm) return res.status(400).json({ error: "Firma adı gerekli" });
-
-  const r = await pool.query(
-    `UPDATE companies
-     SET name=$1, phone=$2, price_per_pack=$3
-     WHERE id=$4 AND is_active=true
-     RETURNING *`,
-    [nm, phone || null, Number(pricePerPack || 0), id]
-  );
-  if (r.rowCount === 0) return res.status(404).json({ error: "Firma bulunamadı" });
-  res.json(r.rows[0]);
-});
-
-app.delete("/companies/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const id = Number(req.params.id);
-  const r = await pool.query(
-    `UPDATE companies SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
-    [id]
-  );
-  if (r.rowCount === 0) return res.status(404).json({ error: "Firma bulunamadı" });
-  res.json({ ok: true });
-});
-
-// ---- BRANCHES ----
-app.get("/companies/:companyId/branches", authRequired, async (req, res) => {
-  const companyId = Number(req.params.companyId);
-  const r = await pool.query(
-    `SELECT id, company_id, name
-     FROM branches
-     WHERE company_id=$1 AND is_active=true
-     ORDER BY name`,
-    [companyId]
-  );
-  res.json(r.rows);
-});
-
-app.post("/companies/:companyId/branches", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const companyId = Number(req.params.companyId);
-  const name = String(req.body?.name || "").trim();
-  if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
-
-  const c = await pool.query(`SELECT id FROM companies WHERE id=$1 AND is_active=true`, [companyId]);
-  if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
-
-  const r = await pool.query(
-    `INSERT INTO branches(company_id, name)
-     VALUES($1,$2)
-     ON CONFLICT (company_id, name) DO UPDATE SET is_active=true
-     RETURNING *`,
-    [companyId, name]
-  );
-  res.json(r.rows[0]);
-});
-
-app.put("/branches/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const id = Number(req.params.id);
-  const name = String(req.body?.name || "").trim();
-  if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
-
-  const r = await pool.query(
-    `UPDATE branches SET name=$1
-     WHERE id=$2 AND is_active=true
-     RETURNING *`,
-    [name, id]
-  );
-  if (r.rowCount === 0) return res.status(404).json({ error: "Şube bulunamadı" });
-  res.json(r.rows[0]);
-});
-
-app.delete("/branches/:id", authRequired, requireRole("ADMIN"), async (req, res) => {
-  const id = Number(req.params.id);
-  const r = await pool.query(
-    `UPDATE branches SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
-    [id]
-  );
-  if (r.rowCount === 0) return res.status(404).json({ error: "Şube bulunamadı" });
-  res.json({ ok: true });
-});
-
 // ---- BALANCE helpers ----
+// Firma bakiyesi: sadece VERESİYE tarafı (peşin satışlar hariç)
 async function companyBalance(companyId) {
   const r = await pool.query(
-    `SELECT COALESCE(SUM(amount),0) AS bal
+    `SELECT COALESCE(SUM(
+       CASE 
+         WHEN entry_type IN ('SALE','DEBT_ADD') THEN amount
+         WHEN entry_type IN ('PAYMENT','RETURN') THEN amount
+         ELSE 0
+       END
+     ),0) AS bal
      FROM ledger_entries
      WHERE company_id=$1`,
     [companyId]
@@ -251,7 +153,13 @@ async function companyBalance(companyId) {
 
 async function branchBalance(branchId) {
   const r = await pool.query(
-    `SELECT COALESCE(SUM(amount),0) AS bal
+    `SELECT COALESCE(SUM(
+       CASE 
+         WHEN entry_type IN ('SALE','DEBT_ADD') THEN amount
+         WHEN entry_type IN ('PAYMENT','RETURN') THEN amount
+         ELSE 0
+       END
+     ),0) AS bal
      FROM ledger_entries
      WHERE branch_id=$1`,
     [branchId]
@@ -259,16 +167,184 @@ async function branchBalance(branchId) {
   return Number(r.rows[0].bal);
 }
 
+// ---- COMPANIES (FİRMA) ----
+app.get("/companies", authRequired, async (_req, res) => {
+  const r = await pool.query(`
+    SELECT
+      c.id,
+      c.name,
+      c.phone,
+      c.price_per_pack,
+      COALESCE(SUM(
+        CASE 
+          WHEN le.entry_type IN ('SALE','DEBT_ADD') THEN le.amount
+          WHEN le.entry_type IN ('PAYMENT','RETURN') THEN le.amount
+          ELSE 0
+        END
+      ),0) AS balance
+    FROM companies c
+    LEFT JOIN ledger_entries le ON le.company_id = c.id
+    WHERE c.is_active=true
+    GROUP BY c.id
+    ORDER BY c.name
+  `);
+  res.json(r.rows);
+});
+
+app.post(
+  "/companies",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const { name, phone, pricePerPack } = req.body;
+    const nm = String(name || "").trim();
+    if (!nm) return res.status(400).json({ error: "Firma adı gerekli" });
+
+    const r = await pool.query(
+      `INSERT INTO companies(name, phone, price_per_pack)
+       VALUES($1,$2,$3)
+       ON CONFLICT (name) DO UPDATE
+         SET phone=EXCLUDED.phone,
+             price_per_pack=EXCLUDED.price_per_pack,
+             is_active=true
+       RETURNING *`,
+      [nm, phone || null, Number(pricePerPack || 0)]
+    );
+    res.json(r.rows[0]);
+  }
+);
+
+app.put(
+  "/companies/:id",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const { name, phone, pricePerPack } = req.body;
+    const nm = String(name || "").trim();
+    if (!nm) return res.status(400).json({ error: "Firma adı gerekli" });
+
+    const r = await pool.query(
+      `UPDATE companies
+       SET name=$1, phone=$2, price_per_pack=$3
+       WHERE id=$4 AND is_active=true
+       RETURNING *`,
+      [nm, phone || null, Number(pricePerPack || 0), id]
+    );
+    if (r.rowCount === 0)
+      return res.status(404).json({ error: "Firma bulunamadı" });
+    res.json(r.rows[0]);
+  }
+);
+
+// soft delete
+app.delete(
+  "/companies/:id",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const r = await pool.query(
+      `UPDATE companies SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
+      [id]
+    );
+    if (r.rowCount === 0)
+      return res.status(404).json({ error: "Firma bulunamadı" });
+    res.json({ ok: true });
+  }
+);
+
+// ---- BRANCHES (ŞUBE) ----
+app.get(
+  "/companies/:companyId/branches",
+  authRequired,
+  async (req, res) => {
+    const companyId = Number(req.params.companyId);
+    const r = await pool.query(
+      `SELECT id, company_id, name
+       FROM branches
+       WHERE company_id=$1 AND is_active=true
+       ORDER BY name`,
+      [companyId]
+    );
+    res.json(r.rows);
+  }
+);
+
+app.post(
+  "/companies/:companyId/branches",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const companyId = Number(req.params.companyId);
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
+
+    // firma var mı
+    const c = await pool.query(
+      `SELECT id FROM companies WHERE id=$1 AND is_active=true`,
+      [companyId]
+    );
+    if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
+
+    const r = await pool.query(
+      `INSERT INTO branches(company_id, name)
+       VALUES($1,$2)
+       ON CONFLICT (company_id, name) DO UPDATE SET is_active=true
+       RETURNING *`,
+      [companyId, name]
+    );
+    res.json(r.rows[0]);
+  }
+);
+
+app.put(
+  "/branches/:id",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
+
+    const r = await pool.query(
+      `UPDATE branches SET name=$1
+       WHERE id=$2 AND is_active=true
+       RETURNING *`,
+      [name, id]
+    );
+    if (r.rowCount === 0)
+      return res.status(404).json({ error: "Şube bulunamadı" });
+    res.json(r.rows[0]);
+  }
+);
+
+app.delete(
+  "/branches/:id",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const r = await pool.query(
+      `UPDATE branches SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
+      [id]
+    );
+    if (r.rowCount === 0)
+      return res.status(404).json({ error: "Şube bulunamadı" });
+    res.json({ ok: true });
+  }
+);
+
 // ---- LEDGER ----
 // entry_type:
-// SALE       (veresiye satış) -> + packs*price
-// CASH_SALE  (peşin satış)    -> + packs*price
-// PAYMENT    (tahsilat)       -> -amount
-// RETURN     (iade)           -> -packs*price
-// DEBT_ADD   (alacak ekle)    -> +amount
-//
+// SALE      (veresiye satış)        -> + packs*price
+// CASH_SALE (peşin satış)           -> + packs*price
+// PAYMENT   (tahsilat - paket/TL)   -> - amount
+// RETURN    (iade)                  -> - packs*price
+// DEBT_ADD  (alacak/veresiye ekle)  -> + amount (paketsiz)
 app.post("/ledger", authRequired, async (req, res) => {
-  const { companyId, branchId, type, packs, amount, note, entryDate } = req.body;
+  const { companyId, branchId, type, packs, amount, note, entryDate } =
+    req.body;
 
   if (!["SALE", "CASH_SALE", "PAYMENT", "RETURN", "DEBT_ADD"].includes(type)) {
     return res.status(400).json({ error: "Geçersiz type" });
@@ -278,19 +354,22 @@ app.post("/ledger", authRequired, async (req, res) => {
   const bid = branchId ? Number(branchId) : null;
   if (!cid) return res.status(400).json({ error: "Firma seç" });
 
+  // firma var mı + fiyat
   const c = await pool.query(
     `SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true`,
     [cid]
   );
   if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
-  const unitPrice = Number(c.rows[0].price_per_pack || 0);
+  const unitPrice = Number(c.rows[0].price_per_pack);
 
+  // şube doğrulama (opsiyonel)
   if (bid) {
     const b = await pool.query(
       `SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true`,
       [bid, cid]
     );
-    if (b.rowCount === 0) return res.status(400).json({ error: "Şube bu firmaya ait değil" });
+    if (b.rowCount === 0)
+      return res.status(400).json({ error: "Şube bu firmaya ait değil" });
   }
 
   const p = Number(packs || 0);
@@ -301,12 +380,23 @@ app.post("/ledger", authRequired, async (req, res) => {
   let amountSigned = 0;
 
   if (type === "PAYMENT") {
-    if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
-    amountSigned = -Math.abs(a);
+    // Tahsilat: paket girilmişse paket * fiyat, yoksa manuel TL
+    if (p > 0) {
+      packsFinal = p;
+      unitPriceFinal = unitPrice;
+      amountSigned = -Math.abs(p * unitPrice);
+    } else {
+      if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
+      amountSigned = -Math.abs(a);
+    }
   } else if (type === "DEBT_ADD") {
-    if (a <= 0) return res.status(400).json({ error: "Alacak/Veresiye tutarı gir" });
+    if (a <= 0)
+      return res
+        .status(400)
+        .json({ error: "Alacak/Veresiye tutarı gir (TL olarak)" });
     amountSigned = Math.abs(a);
   } else {
+    // SALE, CASH_SALE, RETURN -> paket zorunlu
     if (p <= 0) return res.status(400).json({ error: "Paket gir" });
     packsFinal = p;
     unitPriceFinal = unitPrice;
@@ -316,13 +406,28 @@ app.post("/ledger", authRequired, async (req, res) => {
     if (type === "RETURN") amountSigned = -base;
   }
 
-  const finalDate = (req.user.role === "ADMIN" && entryDate) ? entryDate : null;
+  // sadece ADMIN geçmiş tarih girebilir
+  const finalDate =
+    req.user.role === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
-    `INSERT INTO ledger_entries(company_id, branch_id, entry_type, packs, unit_price, amount, note, created_by, entry_date)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, CURRENT_DATE))
+    `INSERT INTO ledger_entries(
+       company_id, branch_id, entry_type, packs, unit_price,
+       amount, note, created_by, entry_date
+     )
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, CURRENT_DATE))
      RETURNING *`,
-    [cid, bid, type, packsFinal, unitPriceFinal, amountSigned, note || null, Number(req.user.uid), finalDate]
+    [
+      cid,
+      bid,
+      type,
+      packsFinal,
+      unitPriceFinal,
+      amountSigned,
+      note || null,
+      Number(req.user.uid),
+      finalDate
+    ]
   );
 
   res.json(r.rows[0]);
@@ -334,7 +439,8 @@ app.post("/expenses", authRequired, async (req, res) => {
   const a = Math.abs(Number(amount || 0));
   if (a <= 0) return res.status(400).json({ error: "Gider tutarı gir" });
 
-  const finalDate = (req.user.role === "ADMIN" && entryDate) ? entryDate : null;
+  const finalDate =
+    req.user.role === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
     `INSERT INTO expense_entries(amount, note, created_by, entry_date)
@@ -351,7 +457,8 @@ app.post("/production", authRequired, async (req, res) => {
   const p = Number(packs || 0);
   if (p <= 0) return res.status(400).json({ error: "Üretim paket gir" });
 
-  const finalDate = (req.user.role === "ADMIN" && entryDate) ? entryDate : null;
+  const finalDate =
+    req.user.role === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
     `INSERT INTO production_entries(packs, note, created_by, entry_date)
@@ -363,101 +470,117 @@ app.post("/production", authRequired, async (req, res) => {
 });
 
 // ---- REPORTS ----
+// Bugün raporu, tarih aralığı, aylık rapor vs.
+// TOPLAM SATIŞ = Peşin + Tahsilat
+// Veresiye = SALE + DEBT_ADD
 async function summaryBetween(from, to) {
   const q = async (sql, params) =>
     Number((await pool.query(sql, params)).rows[0].v);
 
-  // TL toplamları
   const cashSales = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type='CASH_SALE' AND entry_date BETWEEN $1 AND $2`,
+    `SELECT COALESCE(SUM(amount),0) v
+     FROM ledger_entries
+     WHERE entry_type='CASH_SALE'
+       AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const creditSales = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type='SALE' AND entry_date BETWEEN $1 AND $2`,
+  const paymentsRaw = await q(
+    `SELECT COALESCE(SUM(amount),0) v
+     FROM ledger_entries
+     WHERE entry_type='PAYMENT'
+       AND entry_date BETWEEN $1 AND $2`,
+    [from, to]
+  );
+  const payments = Math.abs(paymentsRaw);
+
+  const debtSales = await q(
+    `SELECT COALESCE(SUM(amount),0) v
+     FROM ledger_entries
+     WHERE entry_type IN ('SALE','DEBT_ADD')
+       AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const debtAdds = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type='DEBT_ADD' AND entry_date BETWEEN $1 AND $2`,
-    [from, to]
-  );
-
-  const payments = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type='PAYMENT' AND entry_date BETWEEN $1 AND $2`,
-    [from, to]
-  );
-
-  const returns = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM ledger_entries
-     WHERE entry_type='RETURN' AND entry_date BETWEEN $1 AND $2`,
+  const returnPacks = await q(
+    `SELECT COALESCE(SUM(packs),0) v
+     FROM ledger_entries
+     WHERE entry_type='RETURN'
+       AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
   const expenses = await q(
-    `SELECT COALESCE(SUM(amount),0) v FROM expense_entries
+    `SELECT COALESCE(SUM(amount),0) v
+     FROM expense_entries
      WHERE entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
   const productionPacks = await q(
-    `SELECT COALESCE(SUM(packs),0) v FROM production_entries
+    `SELECT COALESCE(SUM(packs),0) v
+     FROM production_entries
      WHERE entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  // Paket toplamı (satılan paket)
-  const salePacks = await q(
-    `SELECT COALESCE(SUM(packs),0) v FROM ledger_entries
-     WHERE entry_type IN ('SALE','CASH_SALE')
-       AND entry_date BETWEEN $1 AND $2`,
+  const soldPacks = await q(
+    `SELECT COALESCE(SUM(
+       CASE 
+         WHEN entry_type IN ('SALE','CASH_SALE') THEN packs
+         WHEN entry_type='RETURN' THEN -packs
+         ELSE 0
+       END
+     ),0) v
+     FROM ledger_entries
+     WHERE entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const sales = cashSales + creditSales + debtAdds;
+  const totalSales = cashSales + payments; // TOPLAM SATIŞ (peşin + tahsilat)
+  const netCash = totalSales - expenses;   // gider düşülmüş net kasa
 
   return {
     from,
     to,
-    sales,
+    totalSales,
     cashSales,
-    creditSales,
-    debtAdds,
     payments,
-    returns,
+    debtSales,
+    returnPacks,
     expenses,
     productionPacks,
-    salePacks
+    soldPacks,
+    netCash
   };
 }
 
 app.get("/reports/today", authRequired, async (_req, res) => {
-  const d = new Date().toISOString().slice(0, 10);
-  const r = await summaryBetween(d, d);
+  const today = new Date().toISOString().slice(0, 10);
+  const r = await summaryBetween(today, today);
   res.json(r);
 });
 
+// /reports/range?from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get("/reports/range", authRequired, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    return res.status(400).json({ error: "from/to formatı YYYY-MM-DD olmalı" });
+    return res
+      .status(400)
+      .json({ error: "from/to formatı YYYY-MM-DD olmalı" });
   }
 
   const data = await summaryBetween(from, to);
   res.json(data);
 });
 
+// /reports/month?ym=YYYY-MM
 app.get("/reports/month", authRequired, async (req, res) => {
   const ym = String(req.query.ym || "");
-  if (!/^\d{4}-\d{2}$/.test(ym)) {
+  if (!/^\d{4}-\d{2}$/.test(ym))
     return res.status(400).json({ error: "ym formatı YYYY-MM olmalı" });
-  }
 
   const from = `${ym}-01`;
   const toQ = await pool.query(
@@ -470,7 +593,7 @@ app.get("/reports/month", authRequired, async (req, res) => {
   res.json(data);
 });
 
-// BALANCES
+// Firma ve şube toplamları (UI’daki “Toplam / Şube” baloncukları için)
 app.get("/balances/company/:companyId", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const bal = await companyBalance(companyId);
@@ -492,5 +615,5 @@ app.get("/", (_req, res) =>
 );
 
 app.listen(process.env.PORT || 3000, () =>
-  console.log("API up")
+  console.log("API up (yufka-kasa)")
 );
