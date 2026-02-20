@@ -236,25 +236,65 @@ function toggleLedgerFields(){
   if (type === "PAYMENT") setMsg($("opMsg"), "Tahsilat: Paket gir (tutar otomatik hesaplanır)", true);
 }
 
-async function saveLedger(){
-  const type = $("ledgerType")?.value || "";
-  const companyId = Number($("companySelect")?.value || 0);
-  const branchId  = Number($("branchSelect")?.value || 0);
+async function saveLedger() {
+  const entryType = $("ledgerType").value;
+
+  const companyId = Number($("companySelect").value || 0);
+  const branchId  = Number($("branchSelect").value || 0);
+
+  const packs = Number($("ledgerPacks").value || 0);
+  let amount  = Number($("ledgerAmount").value || 0);
+
+  const note = $("ledgerNote").value || null;
+  const entryDate = $("ledgerDate").value || null;
 
   if (!companyId) return alert("Firma seç");
-  if (!branchId) return alert("Şube seç");
+  if (!branchId)  return alert("Şube seç");
 
-  const packs = Number($("ledgerPacks")?.value || 0);
-  const amount = Number($("ledgerAmount")?.value || 0);
-  const note = $("ledgerNote")?.value || null;
-  const entryDate = $("ledgerDate")?.value || null;
-
-  if (type === "SALE" || type === "CASH_SALE" || type === "RETURN" || type === "PAYMENT") {
+  // Peşin satış: paket gir -> tutar otomatik
+  if (entryType === "CASH_SALE") {
     if (packs <= 0) return alert("Paket gir");
+    amount = packs * PACK_PRICE;
   }
-  if (type === "DEBT_ADD") {
+
+  // Veresiye satış / iade: paket şart, tutar 0
+  if (entryType === "SALE" || entryType === "RETURN") {
+    if (packs <= 0) return alert("Paket gir");
+    amount = 0;
+  }
+
+  // Tahsilat / Alacak ekle: tutar şart
+  if (entryType === "PAYMENT" || entryType === "DEBT_ADD") {
     if (amount <= 0) return alert("Tutar gir");
   }
+
+  await api("/ledger", {
+    method: "POST",
+    body: JSON.stringify({
+      type: entryType,
+      companyId,
+      branchId,
+      packs,
+      amount,
+      note,
+      entryDate
+    })
+  });
+
+  // ✅ Kayıt mesajı
+  setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
+
+  // ✅ FORMU SIFIRLA (bir sonraki işlemde tekrar seçilsin)
+  $("ledgerType").value = "";          // işlem tipi boş
+  $("ledgerPacks").value = "";         // paket
+  $("ledgerAmount").value = "";        // tutar
+  $("ledgerNote").value = "";          // not
+  toggleLedgerFields();                // alanları gizle / göster güncelle
+
+  // ✅ Ekranı güncelle
+  await loadCompanies();
+  await reportToday();
+}
 
   await api("/ledger", {
     method: "POST",
