@@ -323,6 +323,13 @@ async function saveExpense(){
   });
 
   setMsg($("opMsg"), "Gider kaydedildi ✅", true);
+
+  // ✅ Gider formunu sıfırla
+  $("expAmount").value = "";
+  $("expNote").value = "";
+  // İstersen burada tarihi de bugüne çekebiliriz:
+  // $("expDate").value = todayYMD();
+
   await reportToday();
 }
 
