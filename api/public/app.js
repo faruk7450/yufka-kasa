@@ -1,3 +1,5 @@
+// public/app.js
+
 let token = localStorage.getItem("token") || "";
 let me = JSON.parse(localStorage.getItem("me") || "null");
 
@@ -33,7 +35,12 @@ function fmt(n) {
   return x.toFixed(2);
 }
 
-// ---------------- UI STATE ----------------
+// HTML'deki eski tipleri backend tiplerine çevir
+function normalizeType(raw) {
+  if (raw === "SALE_CREDIT") return "SALE"; // SATIŞ (Veresiye)
+  if (raw === "DEBIT") return "DEBT_ADD";   // ALACAK / VERESİYE (Tutar)
+  return raw;                               // CASH_SALE, PAYMENT, RETURN
+}
 
 function showLoggedIn() {
   $("loginCard").classList.add("hidden");
@@ -75,8 +82,6 @@ function initDates() {
 let companies = [];
 let branches = [];
 
-// ------------- FİRMA / ŞUBE --------------
-
 async function loadCompanies() {
   companies = await api("/companies");
   const sel = $("companySelect");
@@ -85,7 +90,7 @@ async function loadCompanies() {
   for (const c of companies) {
     const opt = document.createElement("option");
     opt.value = c.id;
-    opt.textContent = `${c.name} (Bakiye: ${fmt(c.balance)})`;
+    opt.textContent = c.name;
     sel.appendChild(opt);
   }
 
@@ -114,7 +119,7 @@ async function loadBranches() {
 
   if (branches.length) sel.value = String(branches[0].id);
 
-  // admin panel firma bilgileri doldur
+  // Admin formunu doldur (fiyat vs)
   const c = companies.find(x => x.id === companyId);
   if (c) {
     $("aCompanyId").value = c.id;
@@ -131,42 +136,43 @@ async function refreshTotals() {
   const branchId = Number($("branchSelect").value || 0);
 
   if (companyId) {
-    const r = await api(`/balances/company/${companyId}`);
-    $("companyTotal").textContent = fmt(r.balance);
+    try {
+      const cb = await api(`/balances/company/${companyId}`);
+      $("companyTotal").textContent = fmt(cb.balance);
+    } catch {
+      $("companyTotal").textContent = fmt(0);
+    }
   } else {
     $("companyTotal").textContent = fmt(0);
   }
 
   if (branchId) {
-    const r2 = await api(`/balances/branch/${branchId}`);
-    $("branchTotal").textContent = fmt(r2.balance);
+    try {
+      const bb = await api(`/balances/branch/${branchId}`);
+      $("branchTotal").textContent = fmt(bb.balance);
+    } catch {
+      $("branchTotal").textContent = fmt(0);
+    }
   } else {
     $("branchTotal").textContent = fmt(0);
   }
-
-  await reportToday();
 }
 
-// ------------- RAPORLAR -------------------
+// ---------- RAPORLAR ----------
 
-function renderReport(prefix, r) {
-  const top = `${prefix} (${r.from} → ${r.to})
-TOPLAM SATIŞ: ${fmt(r.totalSales)}
-- Peşin Satış: ${fmt(r.cashSales)}
-- Tahsilat: ${fmt(r.payments)}
-- Veresiye Satış: ${fmt(r.debtSales)}
-İADE (adet): ${Number(r.returnPacks || 0)}
-GİDER: ${fmt(r.expenses)}
-ÜRETİM (paket): ${Number(r.productionPacks || 0)}
-SATILAN PAKET (toplam): ${Number(r.soldPacks || 0)}
+function renderReport(title, r) {
+  const lines = [];
+  lines.push(`${title} (${r.from} → ${r.to})`);
+  lines.push(`TOPLAM SATIŞ: ${fmt(r.totalSales)} TL`);
+  lines.push(`- Peşin Satış: ${fmt(r.cashSales)} TL`);
+  lines.push(`- Tahsilat: ${fmt(r.payments)} TL`);
+  lines.push(`- Veresiye: ${fmt(r.creditSales)} TL`);
+  lines.push(`İADE: ${fmt(r.returns)} TL`);
+  lines.push(`GİDER: ${fmt(r.expenses)} TL`);
+  lines.push(`ÜRETİM (paket): ${fmt(r.productionPacks)}`);
+  lines.push(`SATILAN PAKET (toplam): ${fmt(r.soldPacks)}`);
 
-GÜNLÜK ÖZET (${r.from})
-- Brüt Satış (Peşin + Tahsilat): ${fmt(r.totalSales)}
-- Gider Düşülmüş Net Kasa:      ${fmt(r.netCash)}
-- Veresiye Toplamı:             ${fmt(r.debtSales)}
-`;
-
-  $("reportOut").textContent = top;
+  $("reportOut").textContent = lines.join("\n");
 }
 
 async function reportToday() {
@@ -191,68 +197,56 @@ async function reportMonth() {
   renderReport("AY RAPORU", r);
 }
 
-// ------------- İŞLEM GİRİŞ ----------------
+// ---------- İŞLEM GİRİŞ ----------
+
+// Not: Fiyat için her firma db'deki price_per_pack kullanılıyor.
+// Frontend'de sabit fiyat tutmuyoruz.
 
 function toggleLedgerFields() {
-  const t = $("ledgerType").value;
+  const raw = $("ledgerType").value;
+  const t = normalizeType(raw);
 
-  const needPacks =
-    t === "SALE" || t === "CASH_SALE" || t === "PAYMENT" || t === "RETURN";
-
-  const needAmountManual = t === "DEBT_ADD";
+  const needPacks = t === "SALE" || t === "CASH_SALE" || t === "RETURN";
+  const needAmountManual = t === "PAYMENT" || t === "DEBT_ADD";
 
   $("ledgerPacks").style.display = needPacks ? "inline-block" : "none";
   $("ledgerAmount").style.display = needAmountManual ? "inline-block" : "none";
-
-  if (t === "CASH_SALE") {
-    setMsg(
-      $("opMsg"),
-      "Peşin satış: Paket gir, tutar otomatik hesaplanır.",
-      true
-    );
-  } else if (t === "PAYMENT") {
-    setMsg(
-      $("opMsg"),
-      "Tahsilat: Paket gir (fiyat firma üzerinden otomatik), istersen TL olarak DEĞER GİRMEK için 'Alacak / Veresiye (Tutar)' kullan.",
-      true
-    );
-  } else {
-    setMsg($("opMsg"), "", true);
-  }
 }
 
 async function saveLedger() {
-  const type = $("ledgerType").value;
+  const rawType = $("ledgerType").value;
+  const type = normalizeType(rawType);
+
   const companyId = Number($("companySelect").value || 0);
   const branchId = Number($("branchSelect").value || 0);
 
   const packs = Number($("ledgerPacks").value || 0);
   let amount = Number($("ledgerAmount").value || 0);
+
   const note = $("ledgerNote").value || null;
   const entryDate = $("ledgerDate").value || null;
 
   if (!companyId) return alert("Firma seç");
   if (!branchId) return alert("Şube seç");
-  if (!type) return alert("İşlem türü seç");
 
-  if (type === "DEBT_ADD") {
-    if (amount <= 0) return alert("Tutar (TL) gir");
-  } else if (type === "PAYMENT") {
-    // Tahsilat: paket gir, amount 0 kalabilir (server firmaya göre hesaplar)
-    if (packs <= 0) return alert("Tahsilat için paket gir");
-    amount = 0;
-  } else {
-    // SALE / CASH_SALE / RETURN
+  // Kurallar
+  if (type === "CASH_SALE" || type === "SALE" || type === "RETURN") {
     if (packs <= 0) return alert("Paket gir");
+    // Tutarı backend firma fiyatına göre hesaplayacak,
+    // biz amount = 0 gönderirsek kendisi hesaplıyor.
     amount = 0;
+  }
+
+  if (type === "PAYMENT" || type === "DEBT_ADD") {
+    if (amount <= 0) return alert("Tutar gir");
   }
 
   await api("/ledger", {
     method: "POST",
     body: JSON.stringify({
+      type,
       companyId,
       branchId,
-      type,
       packs,
       amount,
       note,
@@ -260,21 +254,20 @@ async function saveLedger() {
     })
   });
 
-  // Formu sıfırla
   setMsg($("opMsg"), "İşlem kaydedildi ✅", true);
   $("ledgerPacks").value = "";
   $("ledgerAmount").value = "";
   $("ledgerNote").value = "";
-  $("ledgerType").value = "";
-  toggleLedgerFields();
 
   await refreshTotals();
+  await reportToday();
 }
 
 async function saveExpense() {
   const amount = Number($("expAmount").value || 0);
   const note = $("expNote").value || "";
   const entryDate = $("expDate").value || null;
+
   if (amount <= 0) return alert("Gider tutarı gir");
 
   await api("/expenses", {
@@ -292,6 +285,7 @@ async function saveProd() {
   const packs = Number($("prodPacks").value || 0);
   const note = $("prodNote").value || null;
   const entryDate = $("prodDate").value || null;
+
   if (packs <= 0) return alert("Üretim paket gir");
 
   await api("/production", {
@@ -305,7 +299,7 @@ async function saveProd() {
   await reportToday();
 }
 
-// ------------- ADMIN ----------------------
+// ---------- ADMIN ----------
 
 async function adminSaveCompany() {
   const id = Number($("aCompanyId").value || 0);
@@ -372,7 +366,7 @@ async function adminDeleteBranch() {
   await loadBranches();
 }
 
-// ------------- AUTH -----------------------
+// ---------- AUTH ----------
 
 async function login() {
   try {
@@ -388,8 +382,10 @@ async function login() {
     setMsg($("loginMsg"), "Giriş başarılı ✅", true);
 
     showLoggedIn();
+    applyRoleRestrictions();
     initDates();
     await loadCompanies();
+    await reportToday();
   } catch (e) {
     setMsg($("loginMsg"), e.message, false);
   }
@@ -403,7 +399,7 @@ function logout() {
   showLoggedOut();
 }
 
-// ------------- ROL KISITLARI --------------
+// ---------- ROLE KISITLARI ----------
 
 function applyRoleRestrictions() {
   const isAdmin = me?.role === "ADMIN";
@@ -431,14 +427,12 @@ function applyRoleRestrictions() {
   }
 }
 
-// ------------- INIT -----------------------
+// ---------- SAYFA YÜKLENİNCE ----------
 
 window.addEventListener("load", async () => {
-  // login/logout
   $("btnLogin").addEventListener("click", login);
   $("btnLogout").addEventListener("click", logout);
 
-  // raporlar
   $("btnToday").addEventListener("click", async () => {
     try {
       await reportToday();
@@ -463,7 +457,6 @@ window.addEventListener("load", async () => {
     }
   });
 
-  // firma / şube seçimi
   $("companySelect").addEventListener("change", async () => {
     try {
       await loadBranches();
@@ -480,17 +473,16 @@ window.addEventListener("load", async () => {
     }
   });
 
-  // yenile
   $("btnReloadAll").addEventListener("click", async () => {
     try {
       await loadCompanies();
+      await reportToday();
       setMsg($("opMsg"), "Yenilendi ✅", true);
     } catch (e) {
       alert(e.message);
     }
   });
 
-  // işlem giriş
   $("ledgerType").addEventListener("change", toggleLedgerFields);
   $("btnLedger").addEventListener("click", async () => {
     try {
@@ -516,7 +508,6 @@ window.addEventListener("load", async () => {
     }
   });
 
-  // admin
   $("btnCompanySave").addEventListener("click", async () => {
     try {
       await adminSaveCompany();
@@ -557,6 +548,7 @@ window.addEventListener("load", async () => {
     initDates();
     try {
       await loadCompanies();
+      await reportToday();
     } catch {
       logout();
     }
