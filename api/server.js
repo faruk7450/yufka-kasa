@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import cors from "cors";
 import pg from "pg";
@@ -133,60 +134,13 @@ app.post("/auth/login", async (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 });
 
-// ---- BALANCE helpers ----
-// Firma bakiyesi: sadece VERESİYE tarafı (peşin satışlar hariç)
-async function companyBalance(companyId) {
-  const r = await pool.query(
-    `SELECT COALESCE(SUM(
-       CASE 
-         WHEN entry_type IN ('SALE','DEBT_ADD') THEN amount
-         WHEN entry_type IN ('PAYMENT','RETURN') THEN amount
-         ELSE 0
-       END
-     ),0) AS bal
-     FROM ledger_entries
-     WHERE company_id=$1`,
-    [companyId]
-  );
-  return Number(r.rows[0].bal);
-}
-
-async function branchBalance(branchId) {
-  const r = await pool.query(
-    `SELECT COALESCE(SUM(
-       CASE 
-         WHEN entry_type IN ('SALE','DEBT_ADD') THEN amount
-         WHEN entry_type IN ('PAYMENT','RETURN') THEN amount
-         ELSE 0
-       END
-     ),0) AS bal
-     FROM ledger_entries
-     WHERE branch_id=$1`,
-    [branchId]
-  );
-  return Number(r.rows[0].bal);
-}
-
 // ---- COMPANIES (FİRMA) ----
 app.get("/companies", authRequired, async (_req, res) => {
   const r = await pool.query(`
-    SELECT
-      c.id,
-      c.name,
-      c.phone,
-      c.price_per_pack,
-      COALESCE(SUM(
-        CASE 
-          WHEN le.entry_type IN ('SALE','DEBT_ADD') THEN le.amount
-          WHEN le.entry_type IN ('PAYMENT','RETURN') THEN le.amount
-          ELSE 0
-        END
-      ),0) AS balance
-    FROM companies c
-    LEFT JOIN ledger_entries le ON le.company_id = c.id
-    WHERE c.is_active=true
-    GROUP BY c.id
-    ORDER BY c.name
+    SELECT id, name, phone, price_per_pack
+    FROM companies
+    WHERE is_active=true
+    ORDER BY name
   `);
   res.json(r.rows);
 });
@@ -255,21 +209,17 @@ app.delete(
 );
 
 // ---- BRANCHES (ŞUBE) ----
-app.get(
-  "/companies/:companyId/branches",
-  authRequired,
-  async (req, res) => {
-    const companyId = Number(req.params.companyId);
-    const r = await pool.query(
-      `SELECT id, company_id, name
-       FROM branches
-       WHERE company_id=$1 AND is_active=true
-       ORDER BY name`,
-      [companyId]
-    );
-    res.json(r.rows);
-  }
-);
+app.get("/companies/:companyId/branches", authRequired, async (req, res) => {
+  const companyId = Number(req.params.companyId);
+  const r = await pool.query(
+    `SELECT id, company_id, name
+     FROM branches
+     WHERE company_id=$1 AND is_active=true
+     ORDER BY name`,
+    [companyId]
+  );
+  res.json(r.rows);
+});
 
 app.post(
   "/companies/:companyId/branches",
@@ -285,7 +235,8 @@ app.post(
       `SELECT id FROM companies WHERE id=$1 AND is_active=true`,
       [companyId]
     );
-    if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
+    if (c.rowCount === 0)
+      return res.status(404).json({ error: "Firma yok" });
 
     const r = await pool.query(
       `INSERT INTO branches(company_id, name)
@@ -335,13 +286,34 @@ app.delete(
   }
 );
 
+// ---- BALANCE helpers ----
+async function companyBalance(companyId) {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS bal
+     FROM ledger_entries
+     WHERE company_id=$1`,
+    [companyId]
+  );
+  return Number(r.rows[0].bal);
+}
+
+async function branchBalance(branchId) {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(amount),0) AS bal
+     FROM ledger_entries
+     WHERE branch_id=$1`,
+    [branchId]
+  );
+  return Number(r.rows[0].bal);
+}
+
 // ---- LEDGER ----
 // entry_type:
-// SALE      (veresiye satış)        -> + packs*price
-// CASH_SALE (peşin satış)           -> + packs*price
-// PAYMENT   (tahsilat - paket/TL)   -> - amount
-// RETURN    (iade)                  -> - packs*price
-// DEBT_ADD  (alacak/veresiye ekle)  -> + amount (paketsiz)
+// SALE       (veresiye satış) -> + packs*price
+// CASH_SALE  (peşin satış)    -> + packs*price
+// PAYMENT    (tahsilat)       -> -amount
+// RETURN     (iade)           -> -packs*price
+// DEBT_ADD   (alacak ekle)    -> +amount
 app.post("/ledger", authRequired, async (req, res) => {
   const { companyId, branchId, type, packs, amount, note, entryDate } =
     req.body;
@@ -380,23 +352,13 @@ app.post("/ledger", authRequired, async (req, res) => {
   let amountSigned = 0;
 
   if (type === "PAYMENT") {
-    // Tahsilat: paket girilmişse paket * fiyat, yoksa manuel TL
-    if (p > 0) {
-      packsFinal = p;
-      unitPriceFinal = unitPrice;
-      amountSigned = -Math.abs(p * unitPrice);
-    } else {
-      if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
-      amountSigned = -Math.abs(a);
-    }
+    if (a <= 0) return res.status(400).json({ error: "Tahsilat tutarı gir" });
+    amountSigned = -Math.abs(a);
   } else if (type === "DEBT_ADD") {
     if (a <= 0)
-      return res
-        .status(400)
-        .json({ error: "Alacak/Veresiye tutarı gir (TL olarak)" });
+      return res.status(400).json({ error: "Alacak/Veresiye tutarı gir" });
     amountSigned = Math.abs(a);
   } else {
-    // SALE, CASH_SALE, RETURN -> paket zorunlu
     if (p <= 0) return res.status(400).json({ error: "Paket gir" });
     packsFinal = p;
     unitPriceFinal = unitPrice;
@@ -411,11 +373,10 @@ app.post("/ledger", authRequired, async (req, res) => {
     req.user.role === "ADMIN" && entryDate ? entryDate : null;
 
   const r = await pool.query(
-    `INSERT INTO ledger_entries(
-       company_id, branch_id, entry_type, packs, unit_price,
-       amount, note, created_by, entry_date
-     )
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, CURRENT_DATE))
+    `INSERT INTO ledger_entries
+       (company_id, branch_id, entry_type, packs, unit_price, amount, note, created_by, entry_date)
+     VALUES
+       ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, CURRENT_DATE))
      RETURNING *`,
     [
       cid,
@@ -470,9 +431,6 @@ app.post("/production", authRequired, async (req, res) => {
 });
 
 // ---- REPORTS ----
-// Bugün raporu, tarih aralığı, aylık rapor vs.
-// TOPLAM SATIŞ = Peşin + Tahsilat
-// Veresiye = SALE + DEBT_ADD
 async function summaryBetween(from, to) {
   const q = async (sql, params) =>
     Number((await pool.query(sql, params)).rows[0].v);
@@ -480,33 +438,29 @@ async function summaryBetween(from, to) {
   const cashSales = await q(
     `SELECT COALESCE(SUM(amount),0) v
      FROM ledger_entries
-     WHERE entry_type='CASH_SALE'
-       AND entry_date BETWEEN $1 AND $2`,
+     WHERE entry_type='CASH_SALE' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const paymentsRaw = await q(
+  const creditSales = await q(
     `SELECT COALESCE(SUM(amount),0) v
      FROM ledger_entries
-     WHERE entry_type='PAYMENT'
-       AND entry_date BETWEEN $1 AND $2`,
-    [from, to]
-  );
-  const payments = Math.abs(paymentsRaw);
-
-  const debtSales = await q(
-    `SELECT COALESCE(SUM(amount),0) v
-     FROM ledger_entries
-     WHERE entry_type IN ('SALE','DEBT_ADD')
-       AND entry_date BETWEEN $1 AND $2`,
+     WHERE entry_type IN ('SALE','DEBT_ADD') AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const returnPacks = await q(
-    `SELECT COALESCE(SUM(packs),0) v
+  // Tahsilat ve iade negatif, pozitif gösterelim
+  const payments = await q(
+    `SELECT COALESCE(SUM(-amount),0) v
      FROM ledger_entries
-     WHERE entry_type='RETURN'
-       AND entry_date BETWEEN $1 AND $2`,
+     WHERE entry_type='PAYMENT' AND entry_date BETWEEN $1 AND $2`,
+    [from, to]
+  );
+
+  const returns = await q(
+    `SELECT COALESCE(SUM(-amount),0) v
+     FROM ledger_entries
+     WHERE entry_type='RETURN' AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
@@ -526,32 +480,31 @@ async function summaryBetween(from, to) {
 
   const soldPacks = await q(
     `SELECT COALESCE(SUM(
-       CASE 
-         WHEN entry_type IN ('SALE','CASH_SALE') THEN packs
+       CASE
          WHEN entry_type='RETURN' THEN -packs
-         ELSE 0
+         ELSE packs
        END
      ),0) v
      FROM ledger_entries
-     WHERE entry_date BETWEEN $1 AND $2`,
+     WHERE entry_type IN ('SALE','CASH_SALE','RETURN')
+       AND entry_date BETWEEN $1 AND $2`,
     [from, to]
   );
 
-  const totalSales = cashSales + payments; // TOPLAM SATIŞ (peşin + tahsilat)
-  const netCash = totalSales - expenses;   // gider düşülmüş net kasa
+  // Kullanıcının isteği: Toplam satış = Peşin + Tahsilat (veresiye hariç)
+  const totalSales = cashSales + payments;
 
   return {
     from,
     to,
     totalSales,
     cashSales,
+    creditSales,
     payments,
-    debtSales,
-    returnPacks,
+    returns,
     expenses,
     productionPacks,
-    soldPacks,
-    netCash
+    soldPacks
   };
 }
 
@@ -593,7 +546,7 @@ app.get("/reports/month", authRequired, async (req, res) => {
   res.json(data);
 });
 
-// Firma ve şube toplamları (UI’daki “Toplam / Şube” baloncukları için)
+// Firma ve şube toplamları (baloncuklar için)
 app.get("/balances/company/:companyId", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const bal = await companyBalance(companyId);
@@ -614,6 +567,4 @@ app.get("/", (_req, res) =>
   res.sendFile(new URL("./public/index.html", import.meta.url))
 );
 
-app.listen(process.env.PORT || 3000, () =>
-  console.log("API up (yufka-kasa)")
-);
+app.listen(process.env.PORT || 3000, () => console.log("API up"));
