@@ -1,147 +1,277 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="UTF-8">
   <title>Yufka Kasa</title>
-  <link rel="stylesheet" href="/style.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background:#f3f4f6;
+      margin:0;
+      padding:16px;
+    }
+    .hidden { display:none; }
+    .card {
+      background:white;
+      border-radius:8px;
+      padding:12px 16px;
+      margin-bottom:12px;
+      box-shadow:0 1px 3px rgba(0,0,0,0.08);
+    }
+    h1,h2,h3 {
+      margin:4px 0 8px 0;
+      font-weight:600;
+    }
+    label {
+      font-size:12px;
+      color:#374151;
+      display:block;
+      margin-bottom:2px;
+    }
+    input, select, textarea, button {
+      font-family:inherit;
+      font-size:13px;
+    }
+    input, select, textarea {
+      width:100%;
+      box-sizing:border-box;
+      padding:6px 8px;
+      border-radius:6px;
+      border:1px solid #d1d5db;
+      margin-bottom:6px;
+    }
+    textarea {
+      min-height:80px;
+      resize:vertical;
+    }
+    button {
+      cursor:pointer;
+      border:none;
+      border-radius:6px;
+      padding:6px 10px;
+      margin-right:4px;
+      background:#2563eb;
+      color:white;
+    }
+    button.secondary {
+      background:#6b7280;
+    }
+    .row {
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .col {
+      flex:1;
+      min-width:260px;
+    }
+    .topbar {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:12px;
+    }
+    .pill {
+      font-size:12px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:#e5e7eb;
+    }
+    .muted {
+      font-size:12px;
+      color:#6b7280;
+      margin-top:2px;
+      white-space:pre-wrap;
+    }
+    .muted.ok { color:#059669; }
+    .muted.err { color:#dc2626; }
+    .badge-row {
+      display:flex;
+      gap:8px;
+      font-size:12px;
+      margin-bottom:8px;
+    }
+    .badge {
+      background:#e5e7eb;
+      border-radius:999px;
+      padding:3px 8px;
+    }
+  </style>
 </head>
 <body>
-  <div class="wrap">
 
-    <div class="card" id="loginCard">
-      <h1>Yufka Kasa</h1>
+  <div class="card" id="loginCard">
+    <h2>Yufka Kasa Giriş</h2>
+    <label>PİN</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code">
+    <button id="btnLogin">Giriş</button>
+    <div id="loginMsg" class="muted"></div>
+  </div>
+
+  <div id="mainCard" class="hidden">
+    <div class="topbar">
+      <div>
+        <strong>Yufka Kasa</strong>
+      </div>
+      <div>
+        <span id="userPill" class="pill"></span>
+        <button id="btnLogout" class="secondary">Çıkış</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="row">
         <div class="col">
-          <label>Giriş</label>
-          <input id="pin" placeholder="PIN" />
-          <button id="btnLogin">Giriş</button>
-          <div class="muted" id="loginMsg"></div>
-          <div class="muted small">Admin PIN: Render’daki <b>ADMIN_PIN</b></div>
+          <label>Firma</label>
+          <select id="companySelect"></select>
+        </div>
+        <div class="col">
+          <label>Şube</label>
+          <select id="branchSelect"></select>
+        </div>
+      </div>
+      <div class="badge-row">
+        <span class="badge">Firma Bakiye: <span id="companyTotal">-</span></span>
+        <span class="badge">Şube Bakiye: <span id="branchTotal">-</span></span>
+        <button id="btnReloadAll" class="secondary">Yenile</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <!-- İşlem / Gider / Üretim -->
+      <div class="col">
+        <div class="card" id="opsCard">
+          <h3>İşlem Girişi</h3>
+
+          <label>İşlem Türü</label>
+          <select id="ledgerType">
+            <option value="CASH_SALE">PEŞİN SATIŞ</option>
+            <option value="SALE_CREDIT">SATIŞ (Veresiye)</option>
+            <option value="DEBIT">ALACAK / VERESİYE (Tutar)</option>
+            <option value="PAYMENT">TAHSİLAT (Tutar)</option>
+            <option value="RETURN">İADE</option>
+          </select>
+
+          <label>Paket</label>
+          <input id="ledgerPacks" type="number" min="0" step="1">
+
+          <label>Tutar (sadece Tahsilat / Alacak)</label>
+          <input id="ledgerAmount" type="number" min="0" step="0.01">
+
+          <label>Not</label>
+          <input id="ledgerNote" type="text">
+
+          <label>Tarih</label>
+          <input id="ledgerDate" type="date">
+
+          <button id="btnLedger">Kaydet</button>
+
+          <hr>
+
+          <h4>Gider</h4>
+          <label>Tutar</label>
+          <input id="expAmount" type="number" min="0" step="0.01">
+          <label>Not</label>
+          <input id="expNote" type="text">
+          <label>Tarih</label>
+          <input id="expDate" type="date">
+          <button id="btnExpense" class="secondary">Gider Kaydet</button>
+
+          <hr>
+
+          <h4>Üretim</h4>
+          <label>Paket</label>
+          <input id="prodPacks" type="number" min="0" step="1">
+          <label>Not</label>
+          <input id="prodNote" type="text">
+          <label>Tarih</label>
+          <input id="prodDate" type="date">
+          <button id="btnProd" class="secondary">Üretim Kaydet</button>
+
+          <div id="opMsg" class="muted"></div>
+        </div>
+      </div>
+
+      <!-- Raporlar -->
+      <div class="col">
+        <div class="card" id="reportsCard">
+          <h3>Raporlar</h3>
+          <div>
+            <button id="btnToday">Bugün Raporu</button>
+          </div>
+          <div style="margin-top:6px;">
+            <label>Başlangıç</label>
+            <input id="fromDate" type="date">
+            <label>Bitiş</label>
+            <input id="toDate" type="date">
+            <button id="btnRange" class="secondary">Tarih Aralığı</button>
+          </div>
+          <div style="margin-top:6px;">
+            <label>Ay (YYYY-MM)</label>
+            <input id="ym" type="month">
+            <button id="btnMonth" class="secondary">Ay Raporu</button>
+          </div>
+          <label>Özet</label>
+          <textarea id="reportOut" readonly></textarea>
         </div>
       </div>
     </div>
 
-    <div class="topbar hidden" id="mainCard">
-      <div class="pill" id="userPill">Giriş: -</div>
-      <button class="gray" id="btnLogout">Çıkış</button>
-    </div>
-
-    <div class="card hidden" id="reportsCard">
-      <h2>Rapor</h2>
-      <div class="row wrap">
-        <button id="btnToday">Bugün Raporu</button>
-
-        <label>Başlangıç</label>
-        <input type="date" id="fromDate" />
-
-        <label>Bitiş</label>
-        <input type="date" id="toDate" />
-
-        <button id="btnRange">Tarih Arası</button>
-
-        <label>Aylık</label>
-        <input type="month" id="ym" />
-        <button id="btnMonth">Ay Raporu</button>
-
-        <button class="black" id="btnDetail">Detay Gör</button>
+    <!-- Şube Detay Raporu (sadece ADMIN görünür) -->
+    <div class="card hidden" id="detailCard">
+      <h3>Şube Detay Raporu (Paket)</h3>
+      <div class="row">
+        <div class="col">
+          <label>Başlangıç Tarihi</label>
+          <input id="detailFromDate" type="date">
+        </div>
+        <div class="col">
+          <label>Bitiş Tarihi</label>
+          <input id="detailToDate" type="date">
+        </div>
       </div>
-
-      <pre class="out" id="reportOut"></pre>
-      <pre class="out" id="detailOut"></pre>
-    </div>
-
-    <div class="card hidden" id="opsCard">
-      <h2>İşlem Gir</h2>
-
-      <div class="row wrap">
-        <label>Firma</label>
-        <select id="companySelect"></select>
-
-        <label>Şube</label>
-        <select id="branchSelect"></select>
-
-        <span class="pill">Toplam: <b id="companyTotal">0.00</b></span>
-        <span class="pill">Şube: <b id="branchTotal">0.00</b></span>
-
-        <button class="gray" id="btnReloadAll">Yenile</button>
-      </div>
-
-      <div class="row wrap">
-        <select id="ledgerType">
-          <option value="SALE">SATIŞ (Veresiye)</option>
-          <option value="CASH_SALE">PEŞİN SATIŞ</option>
-          <option value="DEBT_ADD">ALACAK / VERESİYE (Tutar)</option>
-          <option value="PAYMENT">TAHSİLAT (Paket)</option>
-          <option value="RETURN">İADE</option>
-        </select>
-
-        <input id="ledgerPacks" placeholder="Paket (satış/tahsilat/iade)" />
-        <input id="ledgerAmount" placeholder="Tutar (sadece alacak/veresiye)" />
-        <input id="ledgerNote" placeholder="Not" />
-        <input type="date" id="ledgerDate" />
-
-        <button id="btnLedger">Kaydet</button>
-      </div>
-
-      <div class="muted" id="opMsg"></div>
-
-      <hr/>
-
-      <h2>Gider</h2>
-      <div class="row wrap">
-        <input id="expAmount" placeholder="Gider tutarı" />
-        <input id="expNote" placeholder="Not" />
-        <input type="date" id="expDate" />
-        <button id="btnExpense">Gider Kaydet</button>
-      </div>
-
-      <h2>Üretim</h2>
-      <div class="row wrap">
-        <input id="prodPacks" placeholder="Üretim (paket)" />
-        <input id="prodNote" placeholder="Not" />
-        <input type="date" id="prodDate" />
-        <button id="btnProd">Üretim Kaydet</button>
+      <button id="btnBranchDetail">Seçili Şube için Detay Göster</button>
+      <label>Detay</label>
+      <textarea id="detailOut" readonly></textarea>
+      <div class="muted">
+        Not: Burada sadece seçili şube için, seçtiğin tarih aralığında net kaç paket gittiğini görürsün.
       </div>
     </div>
 
+    <!-- Admin Panel -->
     <div class="card hidden" id="adminCard">
-      <h2>Firma / Şube Yönetimi</h2>
-
-      <div class="grid2">
-        <div>
-          <h3>Firma</h3>
-          <div class="row wrap">
-            <input id="aCompanyId" placeholder="ID (boş bırak: ekle)" />
-            <input id="aCompanyName" placeholder="Firma adı" />
-            <input id="aCompanyPhone" placeholder="Telefon" />
-            <input id="aCompanyPrice" placeholder="Paket fiyatı" />
-          </div>
-          <div class="row wrap">
-            <button id="btnCompanySave">Firma Kaydet</button>
-            <button class="danger" id="btnCompanyDelete">Firma Kaldır</button>
-          </div>
+      <h3>Admin: Firma / Şube Ayarları</h3>
+      <div class="row">
+        <div class="col">
+          <h4>Firma</h4>
+          <label>Firma ID</label>
+          <input id="aCompanyId" type="number" readonly>
+          <label>Firma Adı</label>
+          <input id="aCompanyName" type="text">
+          <label>Telefon</label>
+          <input id="aCompanyPhone" type="text">
+          <label>Fiyat / Paket</label>
+          <input id="aCompanyPrice" type="number" step="0.01">
+          <button id="btnCompanySave">Firma Kaydet / Güncelle</button>
+          <button id="btnCompanyDelete" class="secondary">Firmayı Kaldır</button>
         </div>
-
-        <div>
-          <h3>Şube</h3>
-          <div class="muted small">Önce yukarıdan firma seç → sonra şube ekle</div>
-          <div class="row wrap">
-            <input id="aBranchName" placeholder="Yeni şube adı (örn: Keçiborlu)" />
-            <button id="btnBranchAdd">Şube Ekle</button>
-          </div>
-          <div class="row wrap">
-            <input id="aBranchId" placeholder="Şube ID (silmek için)" />
-            <button class="danger" id="btnBranchDelete">Şube Kaldır</button>
-          </div>
+        <div class="col">
+          <h4>Şube</h4>
+          <label>Yeni Şube Adı (seçili firmaya)</label>
+          <input id="aBranchName" type="text">
+          <button id="btnBranchAdd">Şube Ekle</button>
+          <hr>
+          <label>Şube ID (kaldırmak için)</label>
+          <input id="aBranchId" type="number">
+          <button id="btnBranchDelete" class="secondary">Şube Kaldır</button>
         </div>
       </div>
-
-      <div class="muted" id="adminMsg"></div>
+      <div id="adminMsg" class="muted"></div>
     </div>
 
   </div>
 
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
