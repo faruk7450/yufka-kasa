@@ -22,7 +22,7 @@ function setMsg(el, text, ok = true) {
 async function api(path, opts = {}) {
   const headers = opts.headers || {};
   headers["Content-Type"] = "application/json";
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (token) headers["Authorization"] = Bearer ${token};
 
   const res = await fetch(path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
@@ -48,10 +48,15 @@ function showLoggedIn() {
   $("reportsCard").classList.remove("hidden");
   $("opsCard").classList.remove("hidden");
 
-  $("userPill").textContent = `Giriş: ${me?.name || "-"} (${me?.role || "-"})`;
+  $("userPill").textContent = Giriş: ${me?.name || "-"} (${me?.role || "-"});
 
-  if (me?.role === "ADMIN") $("adminCard").classList.remove("hidden");
-  else $("adminCard").classList.add("hidden");
+  if (me?.role === "ADMIN") {
+    $("adminCard").classList.remove("hidden");
+    $("detailCard").classList.remove("hidden");
+  } else {
+    $("adminCard").classList.add("hidden");
+    $("detailCard").classList.add("hidden");
+  }
 }
 
 function showLoggedOut() {
@@ -60,12 +65,13 @@ function showLoggedOut() {
   $("reportsCard").classList.add("hidden");
   $("opsCard").classList.add("hidden");
   $("adminCard").classList.add("hidden");
+  $("detailCard").classList.add("hidden");
 }
 
 function initDates() {
   const ymd = todayYMD();
 
-  ["ledgerDate", "expDate", "prodDate"].forEach(id => {
+  ["ledgerDate", "expDate", "prodDate", "detailFromDate", "detailToDate"].forEach(id => {
     const el = $(id);
     if (el) el.value = ymd;
   });
@@ -90,6 +96,7 @@ async function loadCompanies() {
   for (const c of companies) {
     const opt = document.createElement("option");
     opt.value = c.id;
+    // Personel bakiyeyi görmesin, sadece firma adı
     opt.textContent = c.name;
     sel.appendChild(opt);
   }
@@ -106,7 +113,7 @@ async function loadBranches() {
   const companyId = Number($("companySelect").value || 0);
   if (!companyId) return;
 
-  branches = await api(`/companies/${companyId}/branches`);
+  branches = await api(/companies/${companyId}/branches);
   const sel = $("branchSelect");
   sel.innerHTML = "";
 
@@ -132,29 +139,40 @@ async function loadBranches() {
 }
 
 async function refreshTotals() {
+  const isAdmin = me?.role === "ADMIN";
+
+  const companyTotalEl = $("companyTotal");
+  const branchTotalEl = $("branchTotal");
+
+  if (!isAdmin) {
+    if (companyTotalEl) companyTotalEl.textContent = "-";
+    if (branchTotalEl) branchTotalEl.textContent = "-";
+    return;
+  }
+
   const companyId = Number($("companySelect").value || 0);
   const branchId = Number($("branchSelect").value || 0);
 
   if (companyId) {
     try {
-      const cb = await api(`/balances/company/${companyId}`);
-      $("companyTotal").textContent = fmt(cb.balance);
+      const cb = await api(/balances/company/${companyId});
+      companyTotalEl.textContent = fmt(cb.balance);
     } catch {
-      $("companyTotal").textContent = fmt(0);
+      companyTotalEl.textContent = fmt(0);
     }
   } else {
-    $("companyTotal").textContent = fmt(0);
+    companyTotalEl.textContent = fmt(0);
   }
 
   if (branchId) {
     try {
-      const bb = await api(`/balances/branch/${branchId}`);
-      $("branchTotal").textContent = fmt(bb.balance);
+      const bb = await api(/balances/branch/${branchId});
+      branchTotalEl.textContent = fmt(bb.balance);
     } catch {
-      $("branchTotal").textContent = fmt(0);
+      branchTotalEl.textContent = fmt(0);
     }
   } else {
-    $("branchTotal").textContent = fmt(0);
+    branchTotalEl.textContent = fmt(0);
   }
 }
 
@@ -162,15 +180,15 @@ async function refreshTotals() {
 
 function renderReport(title, r) {
   const lines = [];
-  lines.push(`${title} (${r.from} → ${r.to})`);
-  lines.push(`TOPLAM SATIŞ: ${fmt(r.totalSales)} TL`);
-  lines.push(`- Peşin Satış: ${fmt(r.cashSales)} TL`);
-  lines.push(`- Tahsilat: ${fmt(r.payments)} TL`);
-  lines.push(`- Veresiye: ${fmt(r.creditSales)} TL`);
-  lines.push(`İADE: ${fmt(r.returns)} TL`);
-  lines.push(`GİDER: ${fmt(r.expenses)} TL`);
-  lines.push(`ÜRETİM (paket): ${fmt(r.productionPacks)}`);
-  lines.push(`SATILAN PAKET (toplam): ${fmt(r.soldPacks)}`);
+  lines.push(${title} (${r.from} → ${r.to}));
+  lines.push(TOPLAM SATIŞ: ${fmt(r.totalSales)} TL);
+  lines.push(- Peşin Satış: ${fmt(r.cashSales)} TL);
+  lines.push(- Tahsilat: ${fmt(r.payments)} TL);
+  lines.push(- Veresiye: ${fmt(r.creditSales)} TL);
+  lines.push(İADE: ${fmt(r.returns)} TL);
+  lines.push(GİDER: ${fmt(r.expenses)} TL);
+  lines.push(ÜRETİM (paket): ${fmt(r.productionPacks)});
+  lines.push(SATILAN PAKET (toplam): ${fmt(r.soldPacks)});
 
   $("reportOut").textContent = lines.join("\n");
 }
@@ -193,14 +211,36 @@ async function reportRange() {
 
 async function reportMonth() {
   const ym = $("ym").value;
-  const r = await api(`/reports/month?ym=${encodeURIComponent(ym)}`);
+  const r = await api(/reports/month?ym=${encodeURIComponent(ym)});
   renderReport("AY RAPORU", r);
 }
 
-// ---------- İŞLEM GİRİŞ ----------
+// ---------- ŞUBE DETAY RAPORU (ADMIN) ----------
 
-// Not: Fiyat için her firma db'deki price_per_pack kullanılıyor.
-// Frontend'de sabit fiyat tutmuyoruz.
+async function reportBranchDetail() {
+  const branchId = Number($("branchSelect").value || 0);
+  const from = $("detailFromDate").value;
+  const to = $("detailToDate").value;
+
+  if (!branchId) return alert("Şube seç");
+  if (!from || !to) return alert("Tarih seç");
+
+  const data = await api(
+    `/reports/branch-range?branchId=${branchId}&from=${encodeURIComponent(
+      from
+    )}&to=${encodeURIComponent(to)}`
+  );
+
+  const lines = [];
+  lines.push(ŞUBE DETAY (${from} → ${to}));
+  lines.push(Firma : ${data.companyName || "-"});
+  lines.push(Şube  : ${data.branchName || "-"});
+  lines.push(Toplam Paket: ${fmt(data.totalPacks)});
+
+  $("detailOut").textContent = lines.join("\n");
+}
+
+// ---------- İŞLEM GİRİŞ ----------
 
 function toggleLedgerFields() {
   const raw = $("ledgerType").value;
@@ -229,12 +269,9 @@ async function saveLedger() {
   if (!companyId) return alert("Firma seç");
   if (!branchId) return alert("Şube seç");
 
-  // Kurallar
   if (type === "CASH_SALE" || type === "SALE" || type === "RETURN") {
     if (packs <= 0) return alert("Paket gir");
-    // Tutarı backend firma fiyatına göre hesaplayacak,
-    // biz amount = 0 gönderirsek kendisi hesaplıyor.
-    amount = 0;
+    amount = 0; // tutarı backend fiyatına göre hesaplayacak
   }
 
   if (type === "PAYMENT" || type === "DEBT_ADD") {
@@ -315,7 +352,7 @@ async function adminSaveCompany() {
       body: JSON.stringify({ name, phone: phone || null, pricePerPack })
     });
   } else {
-    await api(`/companies/${id}`, {
+    await api(/companies/${id}, {
       method: "PUT",
       body: JSON.stringify({ name, phone: phone || null, pricePerPack })
     });
@@ -330,7 +367,7 @@ async function adminDeleteCompany() {
   if (!id) return alert("Firma ID gerekli");
   if (!confirm("Firma pasife alınacak. Emin misin?")) return;
 
-  await api(`/companies/${id}`, { method: "DELETE" });
+  await api(/companies/${id}, { method: "DELETE" });
   setMsg($("adminMsg"), "Firma kaldırıldı ✅", true);
   $("aCompanyId").value = "";
   $("aCompanyName").value = "";
@@ -345,7 +382,7 @@ async function adminAddBranch() {
   if (!companyId) return alert("Firma seç");
   if (!name) return alert("Şube adı yaz");
 
-  await api(`/companies/${companyId}/branches`, {
+  await api(/companies/${companyId}/branches, {
     method: "POST",
     body: JSON.stringify({ name })
   });
@@ -360,7 +397,7 @@ async function adminDeleteBranch() {
   if (!id) return alert("Şube ID yaz");
   if (!confirm("Şube pasife alınacak. Emin misin?")) return;
 
-  await api(`/branches/${id}`, { method: "DELETE" });
+  await api(/branches/${id}, { method: "DELETE" });
   $("aBranchId").value = "";
   setMsg($("adminMsg"), "Şube kaldırıldı ✅", true);
   await loadBranches();
@@ -539,6 +576,18 @@ window.addEventListener("load", async () => {
       alert(e.message);
     }
   });
+
+  // Şube detay raporu butonu (sadece admin görecek zaten)
+  const btnBranchDetail = $("btnBranchDetail");
+  if (btnBranchDetail) {
+    btnBranchDetail.addEventListener("click", async () => {
+      try {
+        await reportBranchDetail();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  }
 
   toggleLedgerFields();
 
