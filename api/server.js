@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import pg from "pg";
@@ -79,7 +78,6 @@ async function initDb() {
   const sql = fs.readFileSync(new URL("./db.sql", import.meta.url), "utf8");
   await pool.query(sql);
 
-  // kullanıcılar (yoksa ekle)
   const adminPin = String(process.env.ADMIN_PIN || "1234");
   const staffCashPin = String(process.env.STAFF_CASH_PIN || "1111");
   const staffPin = String(process.env.STAFF_PIN || "2222");
@@ -134,7 +132,7 @@ app.post("/auth/login", async (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
 });
 
-// ---- COMPANIES (FİRMA) ----
+// ---- COMPANIES ----
 app.get("/companies", authRequired, async (_req, res) => {
   const r = await pool.query(`
     SELECT id, name, phone, price_per_pack
@@ -191,7 +189,6 @@ app.put(
   }
 );
 
-// soft delete
 app.delete(
   "/companies/:id",
   authRequired,
@@ -208,7 +205,7 @@ app.delete(
   }
 );
 
-// ---- BRANCHES (ŞUBE) ----
+// ---- BRANCHES ----
 app.get("/companies/:companyId/branches", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const r = await pool.query(
@@ -230,7 +227,6 @@ app.post(
     const name = String(req.body?.name || "").trim();
     if (!name) return res.status(400).json({ error: "Şube adı gerekli" });
 
-    // firma var mı
     const c = await pool.query(
       SELECT id FROM companies WHERE id=$1 AND is_active=true,
       [companyId]
@@ -309,11 +305,11 @@ async function branchBalance(branchId) {
 
 // ---- LEDGER ----
 // entry_type:
-// SALE       (veresiye satış) -> + packs*price
-// CASH_SALE  (peşin satış)    -> + packs*price
-// PAYMENT    (tahsilat)       -> -amount
-// RETURN     (iade)           -> -packs*price
-// DEBT_ADD   (alacak ekle)    -> +amount
+// SALE      (veresiye satış)     -> + packs*price
+// CASH_SALE (peşin satış)        -> + packs*price
+// PAYMENT   (tahsilat)           -> -amount
+// RETURN    (iade)               -> -packs*price
+// DEBT_ADD  (alacak/veresiye ek) -> +amount
 app.post("/ledger", authRequired, async (req, res) => {
   const { companyId, branchId, type, packs, amount, note, entryDate } =
     req.body;
@@ -326,7 +322,6 @@ app.post("/ledger", authRequired, async (req, res) => {
   const bid = branchId ? Number(branchId) : null;
   if (!cid) return res.status(400).json({ error: "Firma seç" });
 
-  // firma var mı + fiyat
   const c = await pool.query(
     SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true,
     [cid]
@@ -334,7 +329,6 @@ app.post("/ledger", authRequired, async (req, res) => {
   if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
   const unitPrice = Number(c.rows[0].price_per_pack);
 
-  // şube doğrulama (opsiyonel)
   if (bid) {
     const b = await pool.query(
       SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true,
@@ -368,7 +362,6 @@ app.post("/ledger", authRequired, async (req, res) => {
     if (type === "RETURN") amountSigned = -base;
   }
 
-  // sadece ADMIN geçmiş tarih girebilir
   const finalDate =
     req.user.role === "ADMIN" && entryDate ? entryDate : null;
 
@@ -490,7 +483,6 @@ async function summaryBetween(from, to) {
     [from, to]
   );
 
-  // Toplam satış = Peşin + Tahsilat (veresiye hariç)
   const totalSales = cashSales + payments;
 
   return {
@@ -513,12 +505,11 @@ app.get("/reports/today", authRequired, async (_req, res) => {
   res.json(r);
 });
 
-// /reports/range?from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get("/reports/range", authRequired, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d2$/.test(to)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return res
       .status(400)
       .json({ error: "from/to formatı YYYY-MM-DD olmalı" });
@@ -528,7 +519,6 @@ app.get("/reports/range", authRequired, async (req, res) => {
   res.json(data);
 });
 
-// /reports/month?ym=YYYY-MM
 app.get("/reports/month", authRequired, async (req, res) => {
   const ym = String(req.query.ym || "");
   if (!/^\d{4}-\d{2}$/.test(ym))
@@ -545,8 +535,8 @@ app.get("/reports/month", authRequired, async (req, res) => {
   res.json(data);
 });
 
-// ---- ŞUBE DETAY RAPORU (sadece ADMIN) ----
-// /reports/branch-range?branchId=...&from=YYYY-MM-DD&to=YYYY-MM-DD
+// ---- ŞUBE DETAY (paket + TL)  ----
+// /reports/branch-range?branchId=..&from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get(
   "/reports/branch-range",
   authRequired,
@@ -575,7 +565,19 @@ app.get(
              WHEN le.entry_type='RETURN' THEN -le.packs
              ELSE 0
            END
-         ),0) AS total_packs
+         ),0) AS total_packs,
+         COALESCE(SUM(
+           CASE WHEN le.entry_type='CASH_SALE' THEN le.amount ELSE 0 END
+         ),0) AS cash_sales,
+         COALESCE(SUM(
+           CASE WHEN le.entry_type IN ('SALE','DEBT_ADD') THEN le.amount ELSE 0 END
+         ),0) AS credit_sales,
+         COALESCE(SUM(
+           CASE WHEN le.entry_type='PAYMENT' THEN -le.amount ELSE 0 END
+         ),0) AS payments,
+         COALESCE(SUM(
+           CASE WHEN le.entry_type='RETURN' THEN -le.amount ELSE 0 END
+         ),0) AS returns
        FROM ledger_entries le
        JOIN branches b ON le.branch_id = b.id
        JOIN companies c ON le.company_id = c.id
@@ -592,7 +594,11 @@ app.get(
         to,
         companyName: null,
         branchName: null,
-        totalPacks: 0
+        totalPacks: 0,
+        cashSales: 0,
+        creditSales: 0,
+        payments: 0,
+        returns: 0
       });
     }
 
@@ -603,12 +609,16 @@ app.get(
       to,
       companyName: row.company_name,
       branchName: row.branch_name,
-      totalPacks: Number(row.total_packs)
+      totalPacks: Number(row.total_packs),
+      cashSales: Number(row.cash_sales),
+      creditSales: Number(row.credit_sales),
+      payments: Number(row.payments),
+      returns: Number(row.returns)
     });
   }
 );
 
-// Firma ve şube toplamları (baloncuklar için)
+// ---- BALANCES API ----
 app.get("/balances/company/:companyId", authRequired, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const bal = await companyBalance(companyId);
