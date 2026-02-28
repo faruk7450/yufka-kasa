@@ -199,7 +199,7 @@ app.delete(
   async (req, res) => {
     const id = Number(req.params.id);
     const r = await pool.query(
-      `UPDATE companies SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
+      UPDATE companies SET is_active=false WHERE id=$1 AND is_active=true RETURNING id,
       [id]
     );
     if (r.rowCount === 0)
@@ -232,7 +232,7 @@ app.post(
 
     // firma var mı
     const c = await pool.query(
-      `SELECT id FROM companies WHERE id=$1 AND is_active=true`,
+      SELECT id FROM companies WHERE id=$1 AND is_active=true,
       [companyId]
     );
     if (c.rowCount === 0)
@@ -277,7 +277,7 @@ app.delete(
   async (req, res) => {
     const id = Number(req.params.id);
     const r = await pool.query(
-      `UPDATE branches SET is_active=false WHERE id=$1 AND is_active=true RETURNING id`,
+      UPDATE branches SET is_active=false WHERE id=$1 AND is_active=true RETURNING id,
       [id]
     );
     if (r.rowCount === 0)
@@ -328,7 +328,7 @@ app.post("/ledger", authRequired, async (req, res) => {
 
   // firma var mı + fiyat
   const c = await pool.query(
-    `SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true`,
+    SELECT price_per_pack FROM companies WHERE id=$1 AND is_active=true,
     [cid]
   );
   if (c.rowCount === 0) return res.status(404).json({ error: "Firma yok" });
@@ -337,7 +337,7 @@ app.post("/ledger", authRequired, async (req, res) => {
   // şube doğrulama (opsiyonel)
   if (bid) {
     const b = await pool.query(
-      `SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true`,
+      SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active=true,
       [bid, cid]
     );
     if (b.rowCount === 0)
@@ -430,7 +430,7 @@ app.post("/production", authRequired, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// ---- REPORTS ----
+// ---- SUMMARY / RAPOR ----
 async function summaryBetween(from, to) {
   const q = async (sql, params) =>
     Number((await pool.query(sql, params)).rows[0].v);
@@ -449,7 +449,6 @@ async function summaryBetween(from, to) {
     [from, to]
   );
 
-  // Tahsilat ve iade negatif, pozitif gösterelim
   const payments = await q(
     `SELECT COALESCE(SUM(-amount),0) v
      FROM ledger_entries
@@ -491,7 +490,7 @@ async function summaryBetween(from, to) {
     [from, to]
   );
 
-  // Kullanıcının isteği: Toplam satış = Peşin + Tahsilat (veresiye hariç)
+  // Toplam satış = Peşin + Tahsilat (veresiye hariç)
   const totalSales = cashSales + payments;
 
   return {
@@ -519,7 +518,7 @@ app.get("/reports/range", authRequired, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d2$/.test(to)) {
     return res
       .status(400)
       .json({ error: "from/to formatı YYYY-MM-DD olmalı" });
@@ -535,9 +534,9 @@ app.get("/reports/month", authRequired, async (req, res) => {
   if (!/^\d{4}-\d{2}$/.test(ym))
     return res.status(400).json({ error: "ym formatı YYYY-MM olmalı" });
 
-  const from = `${ym}-01`;
+  const from = ${ym}-01;
   const toQ = await pool.query(
-    `SELECT (date_trunc('month', $1::date) + interval '1 month - 1 day')::date AS d`,
+    SELECT (date_trunc('month', $1::date) + interval '1 month - 1 day')::date AS d,
     [from]
   );
   const to = toQ.rows[0].d.toISOString().slice(0, 10);
@@ -545,6 +544,69 @@ app.get("/reports/month", authRequired, async (req, res) => {
   const data = await summaryBetween(from, to);
   res.json(data);
 });
+
+// ---- ŞUBE DETAY RAPORU (sadece ADMIN) ----
+// /reports/branch-range?branchId=...&from=YYYY-MM-DD&to=YYYY-MM-DD
+app.get(
+  "/reports/branch-range",
+  authRequired,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const branchId = Number(req.query.branchId || 0);
+    const from = String(req.query.from || "");
+    const to = String(req.query.to || "");
+
+    if (!branchId) {
+      return res.status(400).json({ error: "branchId gerekli" });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res
+        .status(400)
+        .json({ error: "from/to formatı YYYY-MM-DD olmalı" });
+    }
+
+    const r = await pool.query(
+      `SELECT
+         c.name AS company_name,
+         b.name AS branch_name,
+         COALESCE(SUM(
+           CASE
+             WHEN le.entry_type IN ('SALE','CASH_SALE') THEN le.packs
+             WHEN le.entry_type='RETURN' THEN -le.packs
+             ELSE 0
+           END
+         ),0) AS total_packs
+       FROM ledger_entries le
+       JOIN branches b ON le.branch_id = b.id
+       JOIN companies c ON le.company_id = c.id
+       WHERE le.branch_id = $1
+         AND le.entry_date BETWEEN $2 AND $3
+       GROUP BY c.name, b.name`,
+      [branchId, from, to]
+    );
+
+    if (r.rowCount === 0) {
+      return res.json({
+        branchId,
+        from,
+        to,
+        companyName: null,
+        branchName: null,
+        totalPacks: 0
+      });
+    }
+
+    const row = r.rows[0];
+    res.json({
+      branchId,
+      from,
+      to,
+      companyName: row.company_name,
+      branchName: row.branch_name,
+      totalPacks: Number(row.total_packs)
+    });
+  }
+);
 
 // Firma ve şube toplamları (baloncuklar için)
 app.get("/balances/company/:companyId", authRequired, async (req, res) => {
